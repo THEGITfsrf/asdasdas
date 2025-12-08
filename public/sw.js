@@ -5,7 +5,8 @@ self.addEventListener("fetch", evt => {
   const url = new URL(evt.request.url);
 
   // Only intercept API requests under /api/
-  if (url.pathname.startsWith("/sw.js")||url.pathname.startsWith("/index.html")||url.pathname === ("/")) return;
+if (url.pathname === "/" || url.pathname === "/index.html") return; // let network handle page
+
 
   evt.respondWith((async () => {
     const clients = await self.clients.matchAll({ includeUncontrolled: true, type: "window" });
