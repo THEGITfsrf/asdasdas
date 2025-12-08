@@ -2,19 +2,23 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Encrypted WS Proxy</title>
+  <title>Encrypted WS Proxy Test</title>
 </head>
 <body>
   <h1>Encrypted WS Proxy Test</h1>
   <p id="status">Connecting...</p>
+
   <script type="module">
     const statusEl = document.getElementById("status");
 
     // Register service worker
     if ("serviceWorker" in navigator) {
-      navigator.serviceWorker.register("/sw.js").then(() => console.log("SW registered"));
+      await navigator.serviceWorker.register("/sw.js");
+      await navigator.serviceWorker.ready;
+      console.log("SW ready");
     }
 
+    // WebSocket + AES setup
     const ws = new WebSocket("wss://asd-ywj6.onrender.com/ws");
     let aesKey, serverPubKey;
     const pending = new Map();
@@ -22,9 +26,10 @@
     const ab2b64 = buf => btoa(String.fromCharCode(...new Uint8Array(buf)));
     const b642ab = b64 => Uint8Array.from(atob(b64), c=>c.charCodeAt(0)).buffer;
 
+    // Load server RSA key
     async function loadServerKey() {
       const pem = await (await fetch("/public.pem")).text();
-      const spki = pem.split("\n").filter(l=>!l.includes("-----")).join("");
+      const spki = pem.split("\n").filter(l => !l.includes("-----")).join("");
       serverPubKey = await crypto.subtle.importKey(
         "spki",
         b642ab(spki),
@@ -34,11 +39,16 @@
       );
     }
 
+    // Init AES session
     async function initSession() {
-      aesKey = await crypto.subtle.generateKey({ name:"AES-GCM", length:256 }, true, ["encrypt","decrypt"]);
+      aesKey = await crypto.subtle.generateKey(
+        { name: "AES-GCM", length: 256 },
+        true,
+        ["encrypt","decrypt"]
+      );
       const rawKey = await crypto.subtle.exportKey("raw", aesKey);
-      const encrypted = await crypto.subtle.encrypt({ name:"RSA-OAEP" }, serverPubKey, rawKey);
-      ws.send(JSON.stringify({ type:"init", encryptedKeyBase64: ab2b64(encrypted) }));
+      const encrypted = await crypto.subtle.encrypt({ name: "RSA-OAEP" }, serverPubKey, rawKey);
+      ws.send(JSON.stringify({ type: "init", encryptedKeyBase64: ab2b64(encrypted) }));
     }
 
     ws.onopen = async () => {
@@ -48,13 +58,8 @@
       console.log("WS session init done");
     };
 
-    ws.onclose = () => {
-      statusEl.textContent = "Disconnected ❌";
-    };
-
-    ws.onerror = () => {
-      statusEl.textContent = "Connection Error ⚠️";
-    };
+    ws.onclose = () => statusEl.textContent = "Disconnected ❌";
+    ws.onerror = () => statusEl.textContent = "Connection Error ⚠️";
 
     ws.onmessage = async ev => {
       const msg = JSON.parse(ev.data);
@@ -66,9 +71,10 @@
         const p = pending.get(msg.id);
         if (p) { p.resolve(text); pending.delete(msg.id); }
       }
-      if (msg.type==="error") console.error("Server error:", msg.message);
+      if (msg.type === "error") console.error("Server error:", msg.message);
     };
 
+    // send AES-encrypted JSON over WS
     window.sendToBackend = async obj => {
       const id = crypto.randomUUID();
       const iv = crypto.getRandomValues(new Uint8Array(12));
@@ -77,6 +83,20 @@
       ws.send(JSON.stringify({ type:"data", id, ivBase64: ab2b64(iv), payloadBase64: ab2b64(ct) }));
       return new Promise(resolve => pending.set(id, { resolve }));
     };
+
+    // Listen for SW fetch-proxy requests
+    navigator.serviceWorker.addEventListener("message", async evt => {
+      if (evt.data?.type === "fetch-proxy") {
+        const { req } = evt.data;
+        const respBody = await sendToBackend({
+          url: req.url,
+          method: req.method,
+          headers: req.headers,
+          body: req.body
+        });
+        evt.ports[0].postMessage({ body: respBody });
+      }
+    });
   </script>
 </body>
 </html>
