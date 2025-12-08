@@ -7,26 +7,28 @@
 <body>
   <h1>Encrypted WS Proxy Test</h1>
   <p id="status">Connecting...</p>
+  <button id="pingBtn">Test /ping</button>
+  <pre id="pingResult"></pre>
 
   <script type="module">
     const statusEl = document.getElementById("status");
+    const pingBtn = document.getElementById("pingBtn");
+    const pingResult = document.getElementById("pingResult");
 
-    // Register service worker
+    // Register SW
     if ("serviceWorker" in navigator) {
       await navigator.serviceWorker.register("/sw.js");
       await navigator.serviceWorker.ready;
       console.log("SW ready");
     }
 
-    // WebSocket + AES setup
+    // WS + AES setup (same as before)
     const ws = new WebSocket("wss://asd-ywj6.onrender.com/ws");
     let aesKey, serverPubKey;
     const pending = new Map();
-
     const ab2b64 = buf => btoa(String.fromCharCode(...new Uint8Array(buf)));
     const b642ab = b64 => Uint8Array.from(atob(b64), c=>c.charCodeAt(0)).buffer;
 
-    // Load server RSA key
     async function loadServerKey() {
       const pem = await (await fetch("/public.pem")).text();
       const spki = pem.split("\n").filter(l => !l.includes("-----")).join("");
@@ -39,7 +41,6 @@
       );
     }
 
-    // Init AES session
     async function initSession() {
       aesKey = await crypto.subtle.generateKey(
         { name: "AES-GCM", length: 256 },
@@ -71,10 +72,9 @@
         const p = pending.get(msg.id);
         if (p) { p.resolve(text); pending.delete(msg.id); }
       }
-      if (msg.type === "error") console.error("Server error:", msg.message);
+      if (msg.type==="error") console.error("Server error:", msg.message);
     };
 
-    // send AES-encrypted JSON over WS
     window.sendToBackend = async obj => {
       const id = crypto.randomUUID();
       const iv = crypto.getRandomValues(new Uint8Array(12));
@@ -97,6 +97,18 @@
         evt.ports[0].postMessage({ body: respBody });
       }
     });
+
+    // Button click to test /ping
+    pingBtn.onclick = async () => {
+      pingResult.textContent = "Sending /ping...";
+      try {
+        const res = await fetch("/api/ping");
+        const text = await res.text();
+        pingResult.textContent = "Response: " + text;
+      } catch (e) {
+        pingResult.textContent = "Error: " + e;
+      }
+    };
   </script>
 </body>
 </html>
