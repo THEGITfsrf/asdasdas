@@ -5,7 +5,7 @@ self.addEventListener("fetch", evt => {
   const url = new URL(evt.request.url);
 
   // Only intercept API requests under /api/
-if (!url.pathname.startsWit("/api/") return; // let network handle page
+if (!url.pathname.startsWith("/api/") return; // let network handle page
 
 
   evt.respondWith((async () => {
