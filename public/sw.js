@@ -3,21 +3,18 @@ self.addEventListener("activate", evt => evt.waitUntil(self.clients.claim()));
 
 self.addEventListener("fetch", evt => {
   const req = evt.request;
+  const url = new URL(req.url);
 
+  // Don’t intercept the main page or static assets
+  if (url.pathname === "/" || url.pathname.endsWith(".html") || url.pathname.endsWith(".js") || url.pathname.endsWith(".css")) {
+    return; // let the network handle it
+  }
+
+  // Only proxy other requests
   evt.respondWith((async () => {
-    // Wait for a page client to appear (retry a few times)
-    let allClients;
-    for (let i = 0; i < 10; i++) { // 10 tries
-      allClients = await self.clients.matchAll({ includeUncontrolled:true, type:"window" });
-      if (allClients.length) break;
-      await new Promise(r => setTimeout(r, 100)); // wait 100ms
-    }
-
-    if (!allClients || !allClients.length) {
-      return new Response(JSON.stringify({ error: "No page client available" }), {
-        status: 502,
-        headers: { "Content-Type": "application/json" }
-      });
+    const allClients = await self.clients.matchAll({ includeUncontrolled: true, type: "window" });
+    if (!allClients.length) {
+      return fetch(req); // fallback to network if no client
     }
 
     const client = allClients[0];
