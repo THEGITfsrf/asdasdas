@@ -6,7 +6,10 @@
 </head>
 <body>
   <h1>Encrypted WS Proxy Test</h1>
+  <p id="status">Connecting...</p>
   <script type="module">
+    const statusEl = document.getElementById("status");
+
     // Register service worker
     if ("serviceWorker" in navigator) {
       navigator.serviceWorker.register("/sw.js").then(() => console.log("SW registered"));
@@ -16,11 +19,9 @@
     let aesKey, serverPubKey;
     const pending = new Map();
 
-    // Simple helper to convert ArrayBuffer <-> Base64
     const ab2b64 = buf => btoa(String.fromCharCode(...new Uint8Array(buf)));
     const b642ab = b64 => Uint8Array.from(atob(b64), c=>c.charCodeAt(0)).buffer;
 
-    // Load server RSA key
     async function loadServerKey() {
       const pem = await (await fetch("/public.pem")).text();
       const spki = pem.split("\n").filter(l=>!l.includes("-----")).join("");
@@ -33,7 +34,6 @@
       );
     }
 
-    // Generate AES session key and send to server encrypted via RSA
     async function initSession() {
       aesKey = await crypto.subtle.generateKey({ name:"AES-GCM", length:256 }, true, ["encrypt","decrypt"]);
       const rawKey = await crypto.subtle.exportKey("raw", aesKey);
@@ -42,9 +42,18 @@
     }
 
     ws.onopen = async () => {
+      statusEl.textContent = "Connected ✅";
       await loadServerKey();
       await initSession();
       console.log("WS session init done");
+    };
+
+    ws.onclose = () => {
+      statusEl.textContent = "Disconnected ❌";
+    };
+
+    ws.onerror = () => {
+      statusEl.textContent = "Connection Error ⚠️";
     };
 
     ws.onmessage = async ev => {
@@ -60,7 +69,6 @@
       if (msg.type==="error") console.error("Server error:", msg.message);
     };
 
-    // send AES-encrypted JSON over WS
     window.sendToBackend = async obj => {
       const id = crypto.randomUUID();
       const iv = crypto.getRandomValues(new Uint8Array(12));
