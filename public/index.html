@@ -26,6 +26,9 @@
     const ws = new WebSocket("wss://asd-ywj6.onrender.com/ws");
     let aesKey, serverPubKey;
     const pending = new Map();
+    let handshakeResolve;
+    const handshakePromise = new Promise(resolve => handshakeResolve = resolve);
+
     const ab2b64 = buf => btoa(String.fromCharCode(...new Uint8Array(buf)));
     const b642ab = b64 => Uint8Array.from(atob(b64), c => c.charCodeAt(0)).buffer;
 
@@ -56,7 +59,7 @@
       statusEl.textContent = "Connected ✅";
       await loadServerKey();
       await initSession();
-      console.log("WS session init done");
+      console.log("WS init sent, waiting for init_ack...");
     };
 
     ws.onclose = () => statusEl.textContent = "Disconnected ❌";
@@ -64,33 +67,33 @@
 
     ws.onmessage = async ev => {
       const msg = JSON.parse(ev.data);
-
       console.log("Received WS message:", msg);
 
       if (msg.type === "init_ack") {
         console.log("Handshake complete, WS ready for encrypted messages.");
+        handshakeResolve(); // allow sending data
       }
 
       if (msg.type === "data") {
         const iv = b642ab(msg.ivBase64);
         const ct = b642ab(msg.payloadBase64);
-        const decrypted = await crypto.subtle.decrypt({ name: "AES-GCM", iv }, aesKey, ct);
+        const decrypted = await crypto.subtle.decrypt({ name:"AES-GCM", iv }, aesKey, ct);
         const text = new TextDecoder().decode(decrypted);
         const p = pending.get(msg.id);
         if (p) { p.resolve(text); pending.delete(msg.id); }
       }
 
-      if (msg.type === "error") console.error("Server error:", msg.message);
+      if (msg.type==="error") console.error("Server error:", msg.message);
     };
 
     // Send data through WS + AES
     window.sendToBackend = async obj => {
-      if (!aesKey) throw new Error("AES session key not initialized yet");
+      await handshakePromise; // <-- wait for handshake
 
       const id = crypto.randomUUID();
       const iv = crypto.getRandomValues(new Uint8Array(12));
       const encoded = new TextEncoder().encode(JSON.stringify(obj));
-      const ct = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, aesKey, encoded);
+      const ct = await crypto.subtle.encrypt({ name:"AES-GCM", iv }, aesKey, encoded);
 
       ws.send(JSON.stringify({ type: "data", id, ivBase64: ab2b64(iv), payloadBase64: ab2b64(ct) }));
       return new Promise(resolve => pending.set(id, { resolve }));
@@ -114,9 +117,9 @@
     pingBtn.onclick = async () => {
       pingResult.textContent = "Sending /ping...";
       try {
-        const res = await fetch("/api/ping");
-        const text = await res.text();
-        pingResult.textContent = "Response: " + text;
+        // Send via WS + AES
+        const response = await sendToBackend({ url:"/api/ping", method:"GET" });
+        pingResult.textContent = "Response: " + response;
       } catch (e) {
         pingResult.textContent = "Error: " + e;
       }
