@@ -46,7 +46,7 @@ function pemToArrayBuffer(pem) {
 
 async function loadServerKey() {
   // Fetch the PEM from server
-  const pem = await (await fetch("/public.pem")).text();
+  const pem = await (await fetch("https://asd-ywj6.onrender.com/public.pem")).text();
 
   // Import the key for RSA-OAEP encryption
   serverPubKey = await crypto.subtle.importKey(
