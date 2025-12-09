@@ -5,12 +5,11 @@ self.addEventListener("fetch", evt => {
   const url = new URL(evt.request.url);
 
   // Only intercept API requests under /api/
-if (!url.pathname.startsWith("/api/") return; // let network handle page
-
+  if (!url.pathname.startsWith("/api/")) return; // let network handle non-API requests
 
   evt.respondWith((async () => {
     const clients = await self.clients.matchAll({ includeUncontrolled: true, type: "window" });
-    if (!clients.length) return fetch(evt.request); // fallback
+    if (!clients.length) return fetch(evt.request); // fallback if no client
 
     const client = clients[0];
     const mc = new MessageChannel();
