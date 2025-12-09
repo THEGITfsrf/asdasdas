@@ -30,14 +30,24 @@
     const handshakePromise = new Promise(resolve => handshakeResolve = resolve);
 
     const ab2b64 = buf => btoa(String.fromCharCode(...new Uint8Array(buf)));
-    const b642ab = b64 => Uint8Array.from(atob(b64), c => c.charCodeAt(0)).buffer;
-
+    // Convert Base64 string to ArrayBuffer safely
+    function b642ab(b64) {
+      const binary = atob(b64.replace(/\s+/g, "")); // remove spaces/newlines
+      const len = binary.length;
+      const bytes = new Uint8Array(len);
+      for (let i = 0; i < len; i++) bytes[i] = binary.charCodeAt(i);
+      return bytes.buffer;
+    }
+    
     async function loadServerKey() {
       const pem = await (await fetch("/public.pem")).text();
-      const spki = pem.split("\n").filter(l => !l.includes("-----")).join("");
+      const b64 = pem
+        .replace(/-----BEGIN PUBLIC KEY-----/, "")
+        .replace(/-----END PUBLIC KEY-----/, "")
+        .replace(/\s+/g, ""); // remove all whitespace/newlines
       serverPubKey = await crypto.subtle.importKey(
         "spki",
-        b642ab(spki),
+        b642ab(b64),
         { name: "RSA-OAEP", hash: "SHA-256" },
         false,
         ["encrypt"]
