@@ -30,21 +30,20 @@
     const handshakePromise = new Promise(resolve => handshakeResolve = resolve);
 
     const ab2b64 = buf => btoa(String.fromCharCode(...new Uint8Array(buf)));
-    // Convert Base64 string to ArrayBuffer safely
+
+    // Safe Base64 → ArrayBuffer
     function b642ab(b64) {
-      const binary = atob(b64.replace(/\s+/g, "")); // remove spaces/newlines
-      const len = binary.length;
-      const bytes = new Uint8Array(len);
-      for (let i = 0; i < len; i++) bytes[i] = binary.charCodeAt(i);
+      const binary = atob(b64.replace(/\s+/g, ""));
+      const bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
       return bytes.buffer;
     }
-    
+
     async function loadServerKey() {
       const pem = await (await fetch("/public.pem")).text();
-      const b64 = pem
-        .replace(/-----BEGIN PUBLIC KEY-----/, "")
-        .replace(/-----END PUBLIC KEY-----/, "")
-        .replace(/\s+/g, ""); // remove all whitespace/newlines
+      const b64 = pem.replace(/-----BEGIN PUBLIC KEY-----/, "")
+                      .replace(/-----END PUBLIC KEY-----/, "")
+                      .replace(/\s+/g, "");
       serverPubKey = await crypto.subtle.importKey(
         "spki",
         b642ab(b64),
@@ -81,7 +80,7 @@
 
       if (msg.type === "init_ack") {
         console.log("Handshake complete, WS ready for encrypted messages.");
-        handshakeResolve(); // allow sending data
+        handshakeResolve();
       }
 
       if (msg.type === "data") {
@@ -98,7 +97,7 @@
 
     // Send data through WS + AES
     window.sendToBackend = async obj => {
-      await handshakePromise; // <-- wait for handshake
+      await handshakePromise; // wait for init_ack
 
       const id = crypto.randomUUID();
       const iv = crypto.getRandomValues(new Uint8Array(12));
@@ -127,7 +126,6 @@
     pingBtn.onclick = async () => {
       pingResult.textContent = "Sending /ping...";
       try {
-        // Send via WS + AES
         const response = await sendToBackend({ url:"/api/ping", method:"GET" });
         pingResult.textContent = "Response: " + response;
       } catch (e) {
