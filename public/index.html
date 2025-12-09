@@ -31,27 +31,33 @@
 
     const ab2b64 = buf => btoa(String.fromCharCode(...new Uint8Array(buf)));
 
-    // Safe Base64 → ArrayBuffer
-    function b642ab(b64) {
-      const binary = atob(b64.replace(/\s+/g, ""));
-      const bytes = new Uint8Array(binary.length);
-      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-      return bytes.buffer;
-    }
+    // Convert PEM public key to ArrayBuffer safely
+function pemToArrayBuffer(pem) {
+  // Remove header, footer, and all whitespace/newlines
+  const b64 = pem
+    .replace(/-----BEGIN PUBLIC KEY-----/, "")
+    .replace(/-----END PUBLIC KEY-----/, "")
+    .replace(/\s+/g, "");
+  
+  // Decode Base64 into a Uint8Array
+  const binary = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+  return binary.buffer;
+}
 
-    async function loadServerKey() {
-      const pem = await (await fetch("/public.pem")).text();
-      const b64 = pem.replace(/-----BEGIN PUBLIC KEY-----/, "")
-                      .replace(/-----END PUBLIC KEY-----/, "")
-                      .replace(/\s+/g, "");
-      serverPubKey = await crypto.subtle.importKey(
-        "spki",
-        b642ab(b64),
-        { name: "RSA-OAEP", hash: "SHA-256" },
-        false,
-        ["encrypt"]
-      );
-    }
+async function loadServerKey() {
+  // Fetch the PEM from server
+  const pem = await (await fetch("/public.pem")).text();
+
+  // Import the key for RSA-OAEP encryption
+  serverPubKey = await crypto.subtle.importKey(
+    "spki",
+    pemToArrayBuffer(pem),
+    { name: "RSA-OAEP", hash: "SHA-256" },
+    false,
+    ["encrypt"]
+  );
+}
+
 
     async function initSession() {
       aesKey = await crypto.subtle.generateKey(
