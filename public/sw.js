@@ -21,12 +21,14 @@ self.addEventListener("message", evt => {
 self.addEventListener("fetch", evt => {
   const url = new URL(evt.request.url); // MUST create a URL object
 
-  // Don't proxy SW or SharedWorker
   if (url.pathname === "/" ||
-      url.pathname.endsWith("sw.js") ||
-      url.pathname.endsWith("shared.js")) {
-    return; // let network handle
+    url.pathname.endsWith("sw.js") ||
+    url.pathname.endsWith("shared.js")) {
+  console.log("[SW] Not proxying:", url.pathname);
+  return;
   }
+  console.log("[SW] Proxying through SharedWorker:", url.pathname);
+
 
   evt.respondWith(proxyThroughWS(evt.request));
 });
