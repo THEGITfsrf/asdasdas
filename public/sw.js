@@ -21,7 +21,7 @@ self.addEventListener("message", evt => {
 self.addEventListener("fetch", evt => {
   // Don't proxy the SW or SharedWorker
   if (evt.request.url.endsWith("sw.js") ||
-      evt.request.url.endsWith("shared.js") || url.pathname === "/") {
+      evt.request.url.endsWith("shared.js") || evt.request.url.pathname === "/") {
     return;
   }
 
