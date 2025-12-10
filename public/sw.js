@@ -23,7 +23,8 @@ self.addEventListener("fetch", evt => {
 
   if (url.pathname === "/" ||
       url.pathname.endsWith("sw.js") ||
-      url.pathname.endsWith("shared.js")) {
+      url.pathname.endsWith("shared.js") ||
+      url.pathname.endsWith("public.pem")) {
     console.log("[SW] Not proxying:", url.pathname);
     return;
   }
