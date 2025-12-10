@@ -1,3 +1,5 @@
+let sharedPort = null;
+
 self.addEventListener("install", evt => {
   console.log("[SW] Installing...");
   self.skipWaiting();
@@ -8,44 +10,63 @@ self.addEventListener("activate", evt => {
   evt.waitUntil(self.clients.claim());
 });
 
-self.addEventListener("fetch", evt => {
-  const url = new URL(evt.request.url);
-  console.log("[SW] Fetch event for:", url.pathname);
+/* Receive the SharedWorker port from the page */
+self.addEventListener("message", evt => {
+  if (evt.data?.type === "connect-shared-worker") {
+    sharedPort = evt.ports[0];
+    console.log("[SW] Connected SharedWorker port");
+  }
+});
 
-  // Only intercept API requests under /api/
-  if (!url.pathname.startsWith("/api/")) {
-    console.log("[SW] Non-API request, letting network handle it:", url.pathname);
-    return; // let network handle non-API requests
+self.addEventListener("fetch", evt => {
+  // Don't proxy the SW or SharedWorker
+  if (evt.request.url.endsWith("sw.js") ||
+      evt.request.url.endsWith("shared.js")) {
+    return;
   }
 
-  evt.respondWith((async () => {
-    console.log("[SW] Intercepting API request:", url.pathname);
-
-    const clients = await self.clients.matchAll({ includeUncontrolled: true, type: "window" });
-    if (!clients.length) {
-      console.log("[SW] No clients available, falling back to network fetch");
-      return fetch(evt.request); // fallback if no client
-    }
-
-    const client = clients[0];
-    const mc = new MessageChannel();
-    const resp = new Promise(resolve => {
-      mc.port1.onmessage = ev => {
-        console.log("[SW] Received response from client for", url.pathname, ":", ev.data);
-        resolve(ev.data);
-      };
-    });
-
-    const body = evt.request.method === "GET" || evt.request.method === "HEAD" ? null : await evt.request.text();
-    console.log("[SW] Sending request to client:", { method: evt.request.method, body });
-
-    client.postMessage({
-      type: "fetch-proxy",
-      req: { url: evt.request.url, method: evt.request.method, headers: Object.fromEntries(evt.request.headers), body }
-    }, [mc.port2]);
-
-    const data = await resp;
-    console.log("[SW] Responding to fetch with client-provided data for", url.pathname);
-    return new Response(data.body, { status: 200, headers: { "Content-Type": "application/json" } });
-  })());
+  evt.respondWith(proxyThroughWS(evt.request));
 });
+
+async function proxyThroughWS(request) {
+  if (!sharedPort) {
+    console.warn("[SW] No SharedWorker port, falling back to network");
+    return fetch(request);
+  }
+
+  const id = crypto.randomUUID();
+
+  const body =
+    request.method === "GET" || request.method === "HEAD"
+      ? null
+      : await request.text();
+
+  const wrapper = {
+    id,
+    req: {
+      url: request.url,
+      method: request.method,
+      headers: Object.fromEntries(request.headers),
+      body
+    }
+  };
+
+  const responsePromise = new Promise(resolve => {
+    function handler(evt) {
+      if (evt.data?.id === id) {
+        sharedPort.removeEventListener("message", handler);
+        resolve(evt.data);
+      }
+    }
+    sharedPort.addEventListener("message", handler);
+  });
+
+  sharedPort.postMessage(wrapper);
+
+  const result = await responsePromise;
+
+  return new Response(result.body, {
+    status: result.status,
+    headers: result.headers
+  });
+}
