@@ -1,187 +1,28 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-  <meta charset="UTF-8">
-  <title>Encrypted WS Proxy Test</title>
+  <title>Encrypted Proxy Loader</title>
 </head>
 <body>
-  <h1>Encrypted WS Proxy Test</h1>
-  <p id="status">Connecting...</p>
-  <button id="pingBtn">Test /ping</button>
-  <pre id="pingResult"></pre>
+  <h1>Loading…</h1>
 
   <script type="module">
-    const statusEl = document.getElementById("status");
-    const pingBtn = document.getElementById("pingBtn");
-    const pingResult = document.getElementById("pingResult");
+    // Register SW
+    const reg = await navigator.serviceWorker.register("/sw.js");
+    await navigator.serviceWorker.ready;
 
-    // Register Service Worker
-    if ("serviceWorker" in navigator) {
-      await navigator.serviceWorker.register("/sw.js");
-      await navigator.serviceWorker.ready;
-      console.log("SW ready");
-    }
+    // Create SharedWorker
+    const shared = new SharedWorker("/shared.js");
 
-    // WS + AES
-    const ws = new WebSocket("wss://asd-ywj6.onrender.com/ws");
-    let aesKey, serverPubKey;
-    const pending = new Map();
-    let handshakeResolve;
-    const handshakePromise = new Promise(r => handshakeResolve = r);
+    // Send its port to SW
+    const msg = new MessageChannel();
 
-    // Base64 helpers
-    const ab2b64 = buf => btoa(String.fromCharCode(...new Uint8Array(buf)));
-    function b642ab(b64) {
-      const binary = atob(b64);
-      return Uint8Array.from(binary, c => c.charCodeAt(0)).buffer;
-    }
+    reg.active.postMessage(
+      { type: "connect-shared-worker" },
+      [shared.port, msg.port2]
+    );
 
-    // Convert PEM → ArrayBuffer
-    function pemToArrayBuffer(pem) {
-      const b64 = pem
-        .replace(/-----BEGIN PUBLIC KEY-----/, "")
-        .replace(/-----END PUBLIC KEY-----/, "")
-        .replace(/\s+/g, "");
-      return Uint8Array.from(atob(b64), c => c.charCodeAt(0)).buffer;
-    }
-
-    // Load RSA public key
-    async function loadServerKey() {
-      const pem = await (await fetch("https://asd-ywj6.onrender.com/public.pem")).text();
-      serverPubKey = await crypto.subtle.importKey(
-        "spki",
-        pemToArrayBuffer(pem),
-        { name: "RSA-OAEP", hash: "SHA-256" },
-        false,
-        ["encrypt"]
-      );
-    }
-
-    // AES session init
-    async function initSession() {
-      aesKey = await crypto.subtle.generateKey(
-        { name: "AES-GCM", length: 256 },
-        true,
-        ["encrypt", "decrypt"]
-      );
-
-      const rawKey = await crypto.subtle.exportKey("raw", aesKey);
-      const encrypted = await crypto.subtle.encrypt(
-        { name: "RSA-OAEP" },
-        serverPubKey,
-        rawKey
-      );
-
-      ws.send(JSON.stringify({
-        type: "init",
-        encryptedKeyBase64: ab2b64(encrypted)
-      }));
-    }
-
-    ws.onopen = async () => {
-      statusEl.textContent = "Connected ✅";
-      await loadServerKey();
-      await initSession();
-      console.log("WS init sent, waiting for init_ack...");
-    };
-
-    ws.onclose = () => statusEl.textContent = "Disconnected ❌";
-    ws.onerror = () => statusEl.textContent = "Connection Error ⚠️";
-
-    // HANDLE INCOMING ENCRYPTED RESPONSES
-    ws.onmessage = async ev => {
-      const msg = JSON.parse(ev.data);
-      console.log("Received:", msg);
-
-      if (msg.type === "init_ack") {
-        handshakeResolve();
-        return;
-      }
-
-      if (msg.type === "data") {
-        // Decode all fields
-        const iv  = new Uint8Array(b642ab(msg.ivBase64));
-        const ct  = new Uint8Array(b642ab(msg.payloadBase64));
-        const tag = new Uint8Array(b642ab(msg.tagBase64));
-
-        // Reassemble AES-GCM message = ciphertext + tag
-        const full = new Uint8Array(ct.length + tag.length);
-        full.set(ct);
-        full.set(tag, ct.length);
-
-        // Decrypt
-        const decrypted = await crypto.subtle.decrypt(
-          { name: "AES-GCM", iv },
-          aesKey,
-          full
-        );
-
-        const text = new TextDecoder().decode(decrypted);
-        const p = pending.get(msg.id);
-        if (p) {
-          p.resolve(text);
-          pending.delete(msg.id);
-        }
-      }
-
-      if (msg.type === "error")
-        console.error("Server error:", msg.message);
-    };
-
-    // SEND OUTGOING ENCRYPTED REQUESTS WITH TAG
-    window.sendToBackend = async obj => {
-      await handshakePromise;
-
-      const id = crypto.randomUUID();
-      const iv = crypto.getRandomValues(new Uint8Array(12));
-
-      const encoded = new TextEncoder().encode(JSON.stringify(obj));
-
-      const encrypted = await crypto.subtle.encrypt(
-        { name: "AES-GCM", iv },
-        aesKey,
-        encoded
-      );
-
-      const buf = new Uint8Array(encrypted);
-
-      // SPLIT: ciphertext | tag
-      const ciphertext = buf.slice(0, buf.length - 16);
-      const tag = buf.slice(buf.length - 16);
-
-      ws.send(JSON.stringify({
-        type: "data",
-        id,
-        ivBase64: ab2b64(iv),
-        payloadBase64: ab2b64(ciphertext),
-        tagBase64: ab2b64(tag)
-      }));
-
-      return new Promise(resolve => pending.set(id, { resolve }));
-    };
-
-    // SW proxy channel
-    navigator.serviceWorker.addEventListener("message", async evt => {
-      if (evt.data?.type === "fetch-proxy") {
-        const { req } = evt.data;
-        const respBody = await sendToBackend(req);
-        evt.ports[0].postMessage({ body: respBody });
-      }
-    });
-
-    // Ping button
-    pingBtn.onclick = async () => {
-      pingResult.textContent = "Sending /ping...";
-      try {
-        const response = await sendToBackend({
-          url: "/api/ping",
-          method: "GET"
-        });
-        pingResult.textContent = "Response: " + response;
-      } catch (e) {
-        pingResult.textContent = "Error: " + e;
-      }
-    };
+    shared.port.start();
   </script>
 </body>
 </html>
