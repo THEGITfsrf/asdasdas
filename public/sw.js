@@ -21,10 +21,13 @@ self.addEventListener("message", evt => {
 self.addEventListener("fetch", evt => {
   const url = new URL(evt.request.url);
 
-  if (url.pathname === "/" ||
-      url.pathname.endsWith("sw.js") ||
-      url.pathname.endsWith("shared.js") ||
-      url.pathname.endsWith("public.pem")) {
+  // Skip SW, SharedWorker, public key, and root
+  if (
+    url.pathname === "/" ||
+    url.pathname.endsWith("sw.js") ||
+    url.pathname.endsWith("shared.js") ||
+    url.pathname.endsWith("public.pem")
+  ) {
     console.log("[SW] Not proxying:", url.pathname);
     return;
   }
@@ -35,24 +38,25 @@ self.addEventListener("fetch", evt => {
 
 async function proxyThroughWS(request) {
   if (!sharedPort) {
-    console.warn("[SW] No SharedWorker port, falling back to network for:", request.url);
-    const fallbackResp = await fetch(request);
-    console.log("[SW] Fetched from network:", request.url, "status:", fallbackResp.status);
-    return fallbackResp;
+    console.warn("[SW] No SharedWorker port; falling back to network for:", request.url);
+    return fetch(request);
   }
 
   const id = crypto.randomUUID();
+
   const body =
     request.method === "GET" || request.method === "HEAD"
       ? null
       : await request.text();
 
-  console.log("[SW] Forwarding to SharedWorker:", request.url, "method:", request.method, "body:", body);
+  const urlPath = new URL(request.url).pathname; // <-- ONLY the path
+
+  console.log("[SW] Forwarding to SharedWorker:", urlPath, "method:", request.method, "body:", body);
 
   const wrapper = {
     id,
     req: {
-      url: request.url,
+      url: urlPath,      // send only pathname
       method: request.method,
       headers: Object.fromEntries(request.headers),
       body
@@ -63,7 +67,7 @@ async function proxyThroughWS(request) {
     function handler(evt) {
       if (evt.data?.id === id) {
         sharedPort.removeEventListener("message", handler);
-        console.log("[SW] Received response from SharedWorker for:", request.url);
+        console.log("[SW] Received response from SharedWorker for:", urlPath);
         resolve(evt.data);
       }
     }
@@ -74,7 +78,7 @@ async function proxyThroughWS(request) {
 
   const result = await responsePromise;
 
-  console.log("[SW] Returning response to page for:", request.url, "status:", result.status);
+  console.log("[SW] Returning response to page for:", urlPath, "status:", result.status);
 
   return new Response(result.body, {
     status: result.status,
