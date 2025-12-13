@@ -101,7 +101,12 @@ async function initWS() {
 
       if (p) {
         log("Resolving pending request:", msg.id);
-        p.resolve(text);
+        p.resolve({
+          body: text,
+          headers: msg.headers || {},
+          status: msg.status || 200
+        });
+
         pending.delete(msg.id);
       } else {
         log("⚠️ No pending entry for message ID", msg.id);
