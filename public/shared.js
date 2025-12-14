@@ -182,9 +182,10 @@ onconnect = e => {
 
     port.postMessage({
       id,
-      body: rawResponse,
-      status: 200,
-      headers: { "Content-Type": "text/html" }
+      body: rawResponse.body,
+      status: rawResponse.status,
+      headers: rawResponse.headers
     });
+
   };
 };
