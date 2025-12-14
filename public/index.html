@@ -7,23 +7,23 @@
   <h1>Loading…</h1>
 
   <script type="module">
-  // Register the SW
   await navigator.serviceWorker.register("/sw.js");
-  await navigator.serviceWorker.ready;
+
+  if (!navigator.serviceWorker.controller) {
+    location.reload();
+  }
 
   // Create the SharedWorker
   const shared = new SharedWorker("/shared.js");
   shared.port.start();
 
-  // Give its port to the SW
   navigator.serviceWorker.controller.postMessage(
-    {
-      type: "connect-shared-worker"
-    },
-    [shared.port]   // ← ONLY ONE PORT!
+    { type: "connect-shared-worker" },
+    [shared.port]
   );
 
   console.log("[Page] SharedWorker port sent to SW");
 </script>
+
 </body>
 </html>
