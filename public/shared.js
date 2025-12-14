@@ -134,4 +134,62 @@ async function sendToBackend(obj, port) {
   const id = crypto.randomUUID();
   const iv = crypto.getRandomValues(new Uint8Array(12));
 
-  const encoded = new T
+  const encoded = new TextEncoder().encode(JSON.stringify(obj));
+
+  log(port, "Encrypting message with AES-GCM…");
+  const encrypted = await crypto.subtle.encrypt(
+    { name: "AES-GCM", iv },
+    aesKey,
+    encoded
+  );
+
+  const buf = new Uint8Array(encrypted);
+
+  const ciphertext = buf.slice(0, buf.length - 16);
+  const tag = buf.slice(buf.length - 16);
+
+  log(port, "Sending encrypted request to server:", { id });
+
+  ws.send(JSON.stringify({
+    type: "data",
+    id,
+    ivBase64: ab2b64(iv),
+    payloadBase64: ab2b64(ciphertext),
+    tagBase64: ab2b64(tag)
+  }));
+
+  return new Promise(resolve => {
+    log(port, "Registering pending resolver for ID:", id);
+    pending.set(id, { resolve, port });
+  });
+}
+
+onconnect = e => {
+  const port = e.ports[0];
+  const pid = crypto.randomUUID();
+  portMap.set(port, pid);
+
+  log(port, "Port connected from SW → SharedWorker");
+
+  port.onmessage = async evt => {
+    const { id, req } = evt.data;
+
+    log(port, "Received request from SW:", req);
+
+    const rawResponse = await sendToBackend({
+      url: req.url,
+      method: req.method,
+      headers: req.headers,
+      body: req.body
+    }, port);
+
+    log(port, "Sending response back to SW:", rawResponse);
+
+    port.postMessage({
+      id,
+      body: rawResponse.body,
+      status: rawResponse.status,
+      headers: rawResponse.headers
+    });
+  };
+};
