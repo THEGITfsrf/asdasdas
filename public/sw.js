@@ -67,7 +67,12 @@ async function proxyThroughWS(request) {
     function handler(evt) {
       if (evt.data?.id === id) {
         sharedPort.removeEventListener("message", handler);
+
         console.log("[SW] Received response from SharedWorker for:", urlPath);
+        console.log("[SW] Response status:", evt.data.status);
+        console.log("[SW] Response headers:", evt.data.headers);
+        console.log("[SW] Response body snippet:", evt.data.body?.slice(0, 100), "...");
+
         resolve(evt.data);
       }
     }
