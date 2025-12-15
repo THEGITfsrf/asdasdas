@@ -7,23 +7,35 @@
   <h1>Loading…</h1>
 
   <script type="module">
-  await navigator.serviceWorker.register("/sw.js");
+    // 1. Register SW
+    const reg = await navigator.serviceWorker.register("/sw.js");
 
-  if (!navigator.serviceWorker.controller) {
-    location.reload();
-  }
+    // 2. Wait until SW is active AND controlling
+    await navigator.serviceWorker.ready;
+    console.log("[Page] Service Worker ready");
 
-  // Create the SharedWorker
-  const shared = new SharedWorker("/shared.js");
-  shared.port.start();
+    // 3. Create SharedWorker (one per origin)
+    const shared = new SharedWorker("/shared.js");
+    shared.port.start();
 
-  navigator.serviceWorker.controller.postMessage(
-    { type: "connect-shared-worker" },
-    [shared.port]
-  );
+    // Helper to send port safely
+    function sendPort() {
+      if (!navigator.serviceWorker.controller) return;
+      navigator.serviceWorker.controller.postMessage(
+        { type: "connect-shared-worker" },
+        [shared.port]
+      );
+      console.log("[Page] SharedWorker port sent to SW");
+    }
 
-  console.log("[Page] SharedWorker port sent to SW");
-</script>
+    // 4. Initial send
+    sendPort();
 
+    // 5. Re-send if SW restarts or updates
+    navigator.serviceWorker.addEventListener("controllerchange", () => {
+      console.log("[Page] SW controller changed → re-sending port");
+      sendPort();
+    });
+  </script>
 </body>
 </html>
