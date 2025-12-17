@@ -4,11 +4,11 @@ self.addEventListener("install", evt => {
   console.log("[SW] Installing...");
   self.skipWaiting();
 });
-
 self.addEventListener("activate", evt => {
   console.log("[SW] Activating...");
-  evt.waitUntil(self.clients.claim());
+  // ❌ DO NOT claim clients when proxying navigations
 });
+
 
 /* Receive the SharedWorker port from a page */
 self.addEventListener("message", evt => {
