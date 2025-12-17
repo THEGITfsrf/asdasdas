@@ -28,6 +28,7 @@ self.addEventListener("fetch", evt => {
 
   // Never proxy SW / worker assets
   if (
+    url.pathname === "/" ||
     url.pathname.endsWith("sw.js") ||
     url.pathname.endsWith("shared.js") ||
     url.pathname.endsWith("public.pem")
