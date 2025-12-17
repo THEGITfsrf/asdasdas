@@ -7,31 +7,46 @@
   <h1>Loading…</h1>
 
   <script type="module">
-  const reg = await navigator.serviceWorker.register("/sw.js");
-  await navigator.serviceWorker.ready;
-  console.log("[Page] Service Worker ready");
+    async function initWorkers() {
+      // Register Service Worker
+      const reg = await navigator.serviceWorker.register("/sw.js");
+      console.log("[Page] Service Worker registered");
 
-  const shared = new SharedWorker("/shared.js");
-  shared.port.start();
+      // Wait until SW is ready
+      await navigator.serviceWorker.ready;
+      console.log("[Page] Service Worker ready");
 
-  function sendPort() {
-    if (!navigator.serviceWorker.controller) return;
+      // Start SharedWorker
+      const shared = new SharedWorker("/shared.js");
+      shared.port.start();
 
-    navigator.serviceWorker.controller.postMessage(
-      { type: "connect-shared-worker" },
-      [shared.port]
-    );
+      function sendPort() {
+        if (navigator.serviceWorker.controller) {
+          navigator.serviceWorker.controller.postMessage(
+            { type: "connect-shared-worker" },
+            [shared.port]
+          );
+          console.log("[Page] SharedWorker port sent to SW");
+        }
+      }
 
-    console.log("[Page] SharedWorker port sent to SW");
-  }
+      sendPort();
 
-  sendPort();
+      // Resend port if SW controller changes
+      navigator.serviceWorker.addEventListener("controllerchange", sendPort);
 
-  navigator.serviceWorker.addEventListener("controllerchange", () => {
-    console.log("[Page] Controller changed → re-sending port");
-    sendPort();
-  });
-</script>
+      // Wait a moment to ensure SW has registered the port
+      await new Promise(resolve => setTimeout(resolve, 500));
 
+      // Reload once SW + SharedWorker ready
+      if (!window.__swReloaded) {
+        window.__swReloaded = true;
+        console.log("[Page] Reloading now that SW is ready");
+        location.reload();
+      }
+    }
+
+    initWorkers().catch(err => console.error("[Page] Worker init failed:", err));
+  </script>
 </body>
 </html>
