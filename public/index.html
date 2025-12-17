@@ -7,31 +7,31 @@
   <h1>Loading…</h1>
 
   <script type="module">
-    const reg = await navigator.serviceWorker.register("/sw.js");
+  const reg = await navigator.serviceWorker.register("/sw.js");
+  await navigator.serviceWorker.ready;
+  console.log("[Page] Service Worker ready");
 
-    await navigator.serviceWorker.ready;
-    console.log("[Page] Service Worker ready");
+  const shared = new SharedWorker("/shared.js");
+  shared.port.start();
 
-    const shared = new SharedWorker("/shared.js");
-    shared.port.start();
+  function sendPort() {
+    if (!navigator.serviceWorker.controller) return;
 
-    function sendPort() {
-      if (!navigator.serviceWorker.controller) return;
+    navigator.serviceWorker.controller.postMessage(
+      { type: "connect-shared-worker" },
+      [shared.port]
+    );
 
-      navigator.serviceWorker.controller.postMessage(
-        { type: "connect-shared-worker" },
-        [shared.port]
-      );
+    console.log("[Page] SharedWorker port sent to SW");
+  }
 
-      console.log("[Page] SharedWorker port sent to SW");
-    }
+  sendPort();
 
+  navigator.serviceWorker.addEventListener("controllerchange", () => {
+    console.log("[Page] Controller changed → re-sending port");
     sendPort();
+  });
+</script>
 
-    navigator.serviceWorker.addEventListener("controllerchange", () => {
-      console.log("[Page] Controller changed → re-sending port");
-      sendPort();
-    });
-  </script>
 </body>
 </html>
