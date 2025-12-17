@@ -18,9 +18,7 @@ const b642ab = b64 =>
 
 function pemToArrayBuffer(pem) {
   return Uint8Array.from(
-    atob(
-      pem.replace(/-----.*-----|\s+/g, "")
-    ),
+    atob(pem.replace(/-----.*-----|\s+/g, "")),
     c => c.charCodeAt(0)
   ).buffer;
 }
@@ -77,23 +75,27 @@ async function initWS() {
       full.set(ct);
       full.set(tag, ct.length);
 
-      const decrypted = await crypto.subtle.decrypt(
-        { name: "AES-GCM", iv },
-        aesKey,
-        full
-      );
+      try {
+        const decrypted = await crypto.subtle.decrypt(
+          { name: "AES-GCM", iv },
+          aesKey,
+          full
+        );
 
-      const text = new TextDecoder().decode(decrypted);
+        const text = new TextDecoder().decode(decrypted);
 
-      const p = pending.get(msg.id);
-      if (!p) return;
+        const p = pending.get(msg.id);
+        if (!p) return;
 
-      pending.delete(msg.id);
-      p.resolve({
-        body: text,
-        headers: msg.headers || {},
-        status: msg.status || 200
-      });
+        pending.delete(msg.id);
+        p.resolve({
+          body: text,
+          headers: msg.headers || {},
+          status: msg.status || 200
+        });
+      } catch (e) {
+        console.error("[SharedWorker] Decrypt failed", e);
+      }
     }
   };
 
@@ -129,31 +131,3 @@ async function sendToBackend(obj, port) {
 
   return new Promise(resolve => {
     pending.set(id, { resolve, port });
-  });
-}
-
-onconnect = e => {
-  const port = e.ports[0];
-  const portId = crypto.randomUUID();
-  portMap.set(port, portId);
-
-  log(port, "Connected from Service Worker");
-
-  port.onmessage = async evt => {
-    const { id, req } = evt.data;
-
-    const response = await sendToBackend({
-      url: req.url,
-      method: req.method,
-      headers: req.headers,
-      body: req.body
-    }, port);
-
-    port.postMessage({
-      id,
-      body: response.body,
-      status: response.status,
-      headers: response.headers
-    });
-  };
-};
