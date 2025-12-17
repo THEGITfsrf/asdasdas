@@ -1,5 +1,4 @@
-let sharedPort = null;
-let portId = null;
+const portsByClient = new Map(); // clientId -> MessagePort
 
 self.addEventListener("install", evt => {
   console.log("[SW] Installing...");
@@ -11,15 +10,19 @@ self.addEventListener("activate", evt => {
   evt.waitUntil(self.clients.claim());
 });
 
-/* Receive the SharedWorker port from the page */
+/* Receive the SharedWorker port from a page */
 self.addEventListener("message", evt => {
   if (evt.data?.type === "connect-shared-worker") {
-    sharedPort = evt.ports[0];
-    portId = crypto.randomUUID(); // assign a unique port ID
-    console.log(`[SW][Port ${portId}] Connected SharedWorker port`);
+    const clientId = evt.source.id;
+    const port = evt.ports[0];
+
+    portsByClient.set(clientId, port);
+
+    console.log(`[SW] Registered SharedWorker port for client ${clientId}`);
   }
 });
 
+/* Cleanup when a client disappears */
 self.addEventListener("fetch", evt => {
   const url = new URL(evt.request.url);
 
@@ -30,20 +33,25 @@ self.addEventListener("fetch", evt => {
     url.pathname.endsWith("shared.js") ||
     url.pathname.endsWith("public.pem")
   ) {
-    console.log(`[SW][Port ${portId}] Not proxying:`, url.pathname);
     return;
   }
 
-  console.log(`[SW][Port ${portId}] Intercepted fetch:`, url.pathname, "method:", evt.request.method);
-  evt.respondWith(proxyThroughWS(evt.request));
+  evt.respondWith(handleFetch(evt));
 });
 
-async function proxyThroughWS(request) {
-  if (!sharedPort) {
-    console.warn(`[SW][Port ${portId}] No SharedWorker port; falling back to network for:`, request.url);
-    return fetch(request);
+async function handleFetch(evt) {
+  const clientId = evt.clientId;
+  const port = portsByClient.get(clientId);
+
+  if (!port) {
+    console.warn("[SW] No port for client, falling back:", evt.request.url);
+    return fetch(evt.request);
   }
 
+  return proxyThroughWS(evt.request, port, clientId);
+}
+
+async function proxyThroughWS(request, port, clientId) {
   const id = crypto.randomUUID();
 
   const body =
@@ -53,7 +61,7 @@ async function proxyThroughWS(request) {
 
   const urlPath = new URL(request.url).pathname;
 
-  console.log(`[SW][Port ${portId}] Forwarding to SharedWorker:`, urlPath, "method:", request.method, "body:", body);
+  console.log(`[SW][Client ${clientId}] → SharedWorker`, urlPath);
 
   const wrapper = {
     id,
@@ -68,24 +76,16 @@ async function proxyThroughWS(request) {
   const responsePromise = new Promise(resolve => {
     function handler(evt) {
       if (evt.data?.id === id) {
-        sharedPort.removeEventListener("message", handler);
-
-        console.log(`[SW][Port ${portId}] Received response from SharedWorker for:`, urlPath);
-        console.log(`[SW][Port ${portId}] Response status:`, evt.data.status);
-        console.log(`[SW][Port ${portId}] Response headers:`, evt.data.headers);
-        console.log(`[SW][Port ${portId}] Response body snippet:`, evt.data.body?.slice(0, 100), "...");
-
+        port.removeEventListener("message", handler);
         resolve(evt.data);
       }
     }
-    sharedPort.addEventListener("message", handler);
+    port.addEventListener("message", handler);
   });
 
-  sharedPort.postMessage(wrapper);
+  port.postMessage(wrapper);
 
   const result = await responsePromise;
-
-  console.log(`[SW][Port ${portId}] Returning response to page for:`, urlPath, "status:", result.status);
 
   return new Response(result.body, {
     status: result.status,
