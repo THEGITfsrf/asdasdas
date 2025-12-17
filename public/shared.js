@@ -131,3 +131,37 @@ async function sendToBackend(obj, port) {
 
   return new Promise(resolve => {
     pending.set(id, { resolve, port });
+  });
+}
+
+onconnect = e => {
+  const port = e.ports[0];
+  const portId = crypto.randomUUID();
+  portMap.set(port, portId);
+
+  log(port, "Connected from Service Worker");
+  port.start(); // ✅ Important: start the port
+
+  port.onmessage = async evt => {
+    const { id, req } = evt.data;
+
+    try {
+      const response = await sendToBackend(req, port);
+
+      port.postMessage({
+        id,
+        body: response.body,
+        status: response.status,
+        headers: response.headers
+      });
+    } catch (err) {
+      console.error("[SharedWorker] sendToBackend error", err);
+      port.postMessage({
+        id,
+        body: "",
+        status: 500,
+        headers: {}
+      });
+    }
+  };
+};
