@@ -26,9 +26,8 @@ self.addEventListener("message", evt => {
 self.addEventListener("fetch", evt => {
   const url = new URL(evt.request.url);
 
-  // Skip SW, SharedWorker, public key, and root
+  // Never proxy SW / worker assets
   if (
-    url.pathname === "/" ||
     url.pathname.endsWith("sw.js") ||
     url.pathname.endsWith("shared.js") ||
     url.pathname.endsWith("public.pem")
@@ -36,8 +35,28 @@ self.addEventListener("fetch", evt => {
     return;
   }
 
+  // 🚨 IMPORTANT: handle navigations
+  if (evt.request.mode === "navigate") {
+    evt.respondWith(handleNavigation(evt));
+    return;
+  }
+
+  // Normal resource fetch
   evt.respondWith(handleFetch(evt));
 });
+
+async function handleNavigation(evt) {
+  const clientId = evt.clientId;
+  const port = portsByClient.get(clientId);
+
+  // If no port yet, allow initial load
+  if (!port) {
+    return fetch(evt.request);
+  }
+
+  // Proxy HTML navigation through backend
+  return proxyThroughWS(evt.request, port, clientId);
+}
 
 async function handleFetch(evt) {
   const clientId = evt.clientId;
