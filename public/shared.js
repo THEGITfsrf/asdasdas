@@ -25,7 +25,7 @@ async function initWS(){
   ws = new WebSocket("wss://asd-ywj6.onrender.com/ws");
 
   ws.onopen = async ()=>{
-    const pem = await (await fetch("/public.pem")).text();
+    const pem = await (await fetch("https://asd-ywj6.onrender.com/public.pem")).text();
     const serverPubKey = await crypto.subtle.importKey(
       "spki", pemToArrayBuffer(pem),
       {name:"RSA-OAEP", hash:"SHA-256"},
