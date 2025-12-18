@@ -1,93 +1,62 @@
 const portsByClient = new Map(); // clientId -> MessagePort
 
-self.addEventListener("install", evt => {
-  console.log("[SW] Installing...");
-  self.skipWaiting();
-});
+self.addEventListener("install", evt => self.skipWaiting());
+self.addEventListener("activate", evt => console.log("[SW] Activated"));
 
-self.addEventListener("activate", evt => {
-  console.log("[SW] Activating...");
-});
-
-// Receive the SharedWorker port from a page
 self.addEventListener("message", evt => {
   if (evt.data?.type === "connect-shared-worker") {
     const clientId = evt.source.id || evt.clientId;
     const port = evt.ports[0];
-
-    port.start(); // ✅ Start the port
+    port.start(); // must start the port
     portsByClient.set(clientId, port);
-
-    console.log(`[SW] Registered SharedWorker port for client ${clientId}`);
+    console.log(`[SW] Port registered for client ${clientId}`);
   }
 });
 
-// Cleanup / fetch handling
 self.addEventListener("fetch", evt => {
-  const url = new URL(evt.request.url);
-
-  if (
-    url.pathname.endsWith("sw.js") ||
-    url.pathname.endsWith("shared.js") ||
-    url.pathname.endsWith("public.pem")
-  ) return;
-
-  if (evt.request.mode === "navigate") {
-    evt.respondWith(handleNavigation(evt));
-    return;
-  }
-
   evt.respondWith(handleFetch(evt));
 });
 
-async function handleNavigation(evt) {
-  return handleRequest(evt);
-}
-
 async function handleFetch(evt) {
-  return handleRequest(evt);
-}
+  const url = new URL(evt.request.url);
 
-async function handleRequest(evt) {
+  // Never proxy SW, SharedWorker, or keys
+  if (url.pathname.endsWith("sw.js") || url.pathname.endsWith("shared.js") || url.pathname.endsWith("public.pem")) {
+    return fetch(evt.request);
+  }
+
   const clientId = evt.clientId;
   const port = portsByClient.get(clientId);
 
   if (!port) {
-    console.warn("[SW] No SharedWorker port for client, falling back:", evt.request.url);
+    console.warn("[SW] No port yet, fetching normally:", url.href);
     return fetch(evt.request);
   }
 
   return proxyThroughSW(evt.request, port, clientId);
 }
 
-// Proxy request through SharedWorker
 async function proxyThroughSW(request, port, clientId) {
   const id = crypto.randomUUID();
-
-  const body =
-    request.method === "GET" || request.method === "HEAD"
-      ? null
-      : await request.text();
-
-  const urlPath = new URL(request.url).pathname;
-
-  console.log(`[SW][Client ${clientId}] → SharedWorker`, urlPath);
+  const body = request.method === "GET" || request.method === "HEAD"
+    ? null
+    : await request.arrayBuffer(); // binary-safe
 
   const wrapper = {
     id,
     req: {
-      url: urlPath,
+      url: new URL(request.url).pathname,
       method: request.method,
       headers: Object.fromEntries(request.headers),
-      body
+      body: body ? Array.from(new Uint8Array(body)) : null
     }
   };
 
   const responsePromise = new Promise((resolve, reject) => {
     const timeout = setTimeout(() => {
       port.removeEventListener("message", handler);
-      reject(new Error("Timeout waiting for SharedWorker"));
-    }, 5000);
+      reject(new Error("Timeout from SharedWorker"));
+    }, 10000); // 10s for big files
 
     function handler(evt) {
       if (evt.data?.id === id) {
@@ -104,12 +73,11 @@ async function proxyThroughSW(request, port, clientId) {
 
   try {
     const result = await responsePromise;
-    return new Response(result.body, {
-      status: result.status,
-      headers: result.headers
-    });
+    const headers = new Headers(result.headers || {});
+    const resBody = result.body ? new Uint8Array(result.body) : null;
+    return new Response(resBody, { status: result.status || 200, headers });
   } catch (err) {
     console.error("[SW] Proxy error:", err);
-    return fetch(request);
+    return fetch(request); // fallback
   }
 }
