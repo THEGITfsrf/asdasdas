@@ -10,11 +10,11 @@ function b642ab(b64){ return Uint8Array.from(atob(b64), c => c.charCodeAt(0)).bu
 
 // Safe PEM → ArrayBuffer
 function pemToArrayBuffer(pem){
-  const b64 = pem
-    .replace(/-----BEGIN PUBLIC KEY-----|-----END PUBLIC KEY-----/g,"")
-    .replace(/\s+/g,"");
-  return Uint8Array.from(atob(b64), c=>c.charCodeAt(0)).buffer;
+  const b64 = pem.replace(/-----.*-----/g,"") // remove BEGIN/END lines
+                 .replace(/[^A-Za-z0-9+/=]/g, ""); // only keep valid base64 chars
+  return Uint8Array.from(atob(b64), c => c.charCodeAt(0)).buffer;
 }
+
 
 async function initWS(){
   ws = new WebSocket("wss://asd-ywj6.onrender.com/ws");
