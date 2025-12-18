@@ -8,40 +8,45 @@
 
   <script type="module">
     async function initWorkers() {
-      // Register Service Worker
       const reg = await navigator.serviceWorker.register("/sw.js");
       console.log("[Page] Service Worker registered");
 
-      // Wait until SW is ready
       await navigator.serviceWorker.ready;
       console.log("[Page] Service Worker ready");
 
-      // Start SharedWorker
       const shared = new SharedWorker("/shared.js");
       shared.port.start();
 
-      function sendPort() {
-        if (navigator.serviceWorker.controller) {
-          navigator.serviceWorker.controller.postMessage(
-            { type: "connect-shared-worker" },
-            [shared.port]
-          );
-          console.log("[Page] SharedWorker port sent to SW");
+      // Wait for handshake done message from SharedWorker
+      await new Promise(resolve => {
+        function onMessage(evt) {
+          if (evt.data?.type === "handshake_done") {
+            shared.port.removeEventListener("message", onMessage);
+            resolve();
+          }
         }
+        shared.port.addEventListener("message", onMessage);
+      });
+
+      console.log("[Page] SharedWorker handshake done, sending port to SW");
+
+      function sendPort() {
+        if (!navigator.serviceWorker.controller) return;
+        navigator.serviceWorker.controller.postMessage(
+          { type: "connect-shared-worker" },
+          [shared.port]
+        );
+        console.log("[Page] SharedWorker port sent to SW");
       }
 
       sendPort();
 
-      // Resend port if SW controller changes
       navigator.serviceWorker.addEventListener("controllerchange", sendPort);
 
-      // Wait a moment to ensure SW has registered the port
-      await new Promise(resolve => setTimeout(resolve, 500));
-
-      // Reload once SW + SharedWorker ready
+      // Reload once everything is ready
       if (!window.__swReloaded) {
         window.__swReloaded = true;
-        console.log("[Page] Reloading now that SW is ready");
+        console.log("[Page] Reloading now that SW + SharedWorker ready");
         location.reload();
       }
     }
