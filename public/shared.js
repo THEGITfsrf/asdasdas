@@ -8,7 +8,13 @@ const log = (port, ...args) => console.log(`[SharedWorker][${portMap.get(port) |
 function ab2b64(buf){ return btoa(String.fromCharCode(...new Uint8Array(buf))); }
 function b642ab(b64){ return Uint8Array.from(atob(b64), c => c.charCodeAt(0)).buffer; }
 
-function pemToArrayBuffer(pem){ return Uint8Array.from(atob(pem.replace(/-----.*-----|\s+/g,'')), c=>c.charCodeAt(0)).buffer; }
+// Safe PEM → ArrayBuffer
+function pemToArrayBuffer(pem){
+  const b64 = pem
+    .replace(/-----BEGIN PUBLIC KEY-----|-----END PUBLIC KEY-----/g,"")
+    .replace(/\s+/g,"");
+  return Uint8Array.from(atob(b64), c=>c.charCodeAt(0)).buffer;
+}
 
 async function initWS(){
   ws = new WebSocket("wss://asd-ywj6.onrender.com/ws");
@@ -30,7 +36,12 @@ async function initWS(){
 
   ws.onmessage = async evt=>{
     const msg = JSON.parse(evt.data);
-    if(msg.type==="init_ack"){ handshakeResolve(); return; }
+    if(msg.type==="init_ack"){ 
+      handshakeResolve();
+      // Notify page that handshake is done
+      broadcastToPorts({type:"handshake_done"});
+      return; 
+    }
     if(msg.type!=="data") return;
 
     const iv = new Uint8Array(b642ab(msg.ivBase64));
@@ -52,6 +63,10 @@ async function initWS(){
 
 initWS();
 
+function broadcastToPorts(msg){
+  ports.forEach(port => port.postMessage(msg));
+}
+
 async function sendToBackend(obj, port){
   await handshakePromise;
   const id = crypto.randomUUID();
@@ -71,10 +86,14 @@ async function sendToBackend(obj, port){
   return new Promise(resolve=>pending.set(id,{resolve, port}));
 }
 
+// Track all ports for handshake broadcast
+const ports = new Set();
+
 onconnect = e=>{
   const port = e.ports[0];
   const pid = crypto.randomUUID();
   portMap.set(port, pid);
+  ports.add(port);
   port.start();
   log(port,"Connected");
 
@@ -88,4 +107,6 @@ onconnect = e=>{
       port.postMessage({id, body:null, headers:{}, status:500});
     }
   };
+
+  port.onclose = ()=>ports.delete(port);
 };
