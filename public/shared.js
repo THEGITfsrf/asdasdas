@@ -9,11 +9,16 @@ function ab2b64(buf){ return btoa(String.fromCharCode(...new Uint8Array(buf))); 
 function b642ab(b64){ return Uint8Array.from(atob(b64), c => c.charCodeAt(0)).buffer; }
 
 // Safe PEM → ArrayBuffer
-function pemToArrayBuffer(pem){
-  const b64 = pem.replace(/-----.*-----/g,"") // remove BEGIN/END lines
-                 .replace(/[^A-Za-z0-9+/=]/g, ""); // only keep valid base64 chars
+function pemToArrayBuffer(pem) {
+  // Remove BEGIN/END lines
+  let b64 = pem.replace(/-----BEGIN PUBLIC KEY-----|-----END PUBLIC KEY-----/g, "");
+  
+  // Remove all non-base64 characters (including newlines, spaces, carriage returns)
+  b64 = b64.replace(/[^A-Za-z0-9+/=]/g, "");
+
   return Uint8Array.from(atob(b64), c => c.charCodeAt(0)).buffer;
 }
+
 
 
 async function initWS(){
