@@ -3,23 +3,20 @@ let pending = new Map();
 let handshakeResolve;
 const handshakePromise = new Promise(r => handshakeResolve = r);
 const portMap = new WeakMap();
+const ports = new Set();
+
 const log = (port, ...args) => console.log(`[SharedWorker][${portMap.get(port) || "WS"}]`, ...args);
 
+// Base64 ↔ ArrayBuffer
 function ab2b64(buf){ return btoa(String.fromCharCode(...new Uint8Array(buf))); }
 function b642ab(b64){ return Uint8Array.from(atob(b64), c => c.charCodeAt(0)).buffer; }
 
 // Safe PEM → ArrayBuffer
 function pemToArrayBuffer(pem) {
-  // Remove BEGIN/END lines
   let b64 = pem.replace(/-----BEGIN PUBLIC KEY-----|-----END PUBLIC KEY-----/g, "");
-  
-  // Remove all non-base64 characters (including newlines, spaces, carriage returns)
   b64 = b64.replace(/[^A-Za-z0-9+/=]/g, "");
-
   return Uint8Array.from(atob(b64), c => c.charCodeAt(0)).buffer;
 }
-
-
 
 async function initWS(){
   ws = new WebSocket("wss://asd-ywj6.onrender.com/ws");
@@ -41,18 +38,20 @@ async function initWS(){
 
   ws.onmessage = async evt=>{
     const msg = JSON.parse(evt.data);
+
     if(msg.type==="init_ack"){ 
       handshakeResolve();
-      // Notify page that handshake is done
       broadcastToPorts({type:"handshake_done"});
       return; 
     }
+
     if(msg.type!=="data") return;
 
     const iv = new Uint8Array(b642ab(msg.ivBase64));
     const ct = new Uint8Array(b642ab(msg.payloadBase64));
     const tag = new Uint8Array(b642ab(msg.tagBase64));
-    const full = new Uint8Array(ct.length+tag.length); full.set(ct); full.set(tag, ct.length);
+    const full = new Uint8Array(ct.length+tag.length);
+    full.set(ct); full.set(tag, ct.length);
 
     try {
       const decrypted = await crypto.subtle.decrypt({name:"AES-GCM", iv}, aesKey, full);
@@ -90,9 +89,6 @@ async function sendToBackend(obj, port){
 
   return new Promise(resolve=>pending.set(id,{resolve, port}));
 }
-
-// Track all ports for handshake broadcast
-const ports = new Set();
 
 onconnect = e=>{
   const port = e.ports[0];
