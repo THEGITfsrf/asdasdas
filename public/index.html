@@ -8,16 +8,18 @@
 
   <script type="module">
     async function initWorkers() {
+      console.log("[Page] Registering Service Worker...");
       const reg = await navigator.serviceWorker.register("/sw.js");
       console.log("[Page] Service Worker registered");
 
       await navigator.serviceWorker.ready;
       console.log("[Page] Service Worker ready");
 
+      // Initialize SharedWorker
       const shared = new SharedWorker("/shared.js");
       shared.port.start();
 
-      // Wait for handshake done message from SharedWorker
+      // Wait for handshake
       await new Promise(resolve => {
         function onMessage(evt) {
           if (evt.data?.type === "handshake_done") {
@@ -27,11 +29,10 @@
         }
         shared.port.addEventListener("message", onMessage);
       });
+      console.log("[Page] SharedWorker handshake done");
 
-      console.log("[Page] SharedWorker handshake done, sending port to SW");
-
-      function sendPort() {
-        if (!navigator.serviceWorker.controller) return;
+      // Send port to SW
+      if (navigator.serviceWorker.controller) {
         navigator.serviceWorker.controller.postMessage(
           { type: "connect-shared-worker" },
           [shared.port]
@@ -39,15 +40,15 @@
         console.log("[Page] SharedWorker port sent to SW");
       }
 
-      sendPort();
-      navigator.serviceWorker.addEventListener("controllerchange", sendPort);
+      // Everything ready, now load rest of the page
+      console.log("[Page] All workers ready, loading app content...");
+      loadApp();
+    }
 
-      // Reload once everything is ready
-      if (!window.__swReloaded) {
-        window.__swReloaded = true;
-        console.log("[Page] Reloading now that SW + SharedWorker ready");
-        location.reload();
-      }
+    function loadApp() {
+      // Here you insert your real page content dynamically
+      document.body.innerHTML = "<h1>App Loaded!</h1>";
+      // Or you can dynamically append script tags for your app JS
     }
 
     initWorkers().catch(err => console.error("[Page] Worker init failed:", err));
