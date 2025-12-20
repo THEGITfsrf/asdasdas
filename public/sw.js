@@ -1,18 +1,22 @@
 const portsByClient = new Map();
+const readyByClient = new Map();
 
 self.addEventListener("install", evt => self.skipWaiting());
 self.addEventListener("activate", evt => console.log("[SW] Activated"));
 
+// Register port from client to communicate with SharedWorker
 self.addEventListener("message", evt => {
   if (evt.data?.type === "connect-shared-worker") {
-    const clientId = evt.source.id || evt.clientId;
+    const clientId = evt.clientId;
     const port = evt.ports[0];
     port.start();
     portsByClient.set(clientId, port);
+    readyByClient.set(clientId, Promise.resolve());
     console.log(`[SW] Port registered for client ${clientId}`);
   }
 });
 
+// Intercept fetch requests
 self.addEventListener("fetch", evt => {
   evt.respondWith(handleFetch(evt));
 });
@@ -20,19 +24,27 @@ self.addEventListener("fetch", evt => {
 async function handleFetch(evt) {
   const url = new URL(evt.request.url);
 
+  // Bypass SW for core files
   if (url.pathname.endsWith("sw.js") || url.pathname.endsWith("shared.js") || url.pathname.endsWith("public.pem")) {
     return fetch(evt.request);
   }
 
   const clientId = evt.clientId;
   const port = portsByClient.get(clientId);
+  const ready = readyByClient.get(clientId);
 
-  if (!port) {
+  if (!port || !ready) {
     // fallback for very early requests
     return fetch(evt.request);
   }
 
-  return proxyThroughSW(evt.request, port, clientId);
+  try {
+    await ready; // wait for port to be ready
+    return proxyThroughSW(evt.request, port, clientId);
+  } catch (err) {
+    console.error("[SW] Fetch proxy error:", err);
+    return fetch(evt.request);
+  }
 }
 
 async function proxyThroughSW(request, port, clientId) {
@@ -44,7 +56,7 @@ async function proxyThroughSW(request, port, clientId) {
   const wrapper = {
     id,
     req: {
-      url: new URL(request.url).pathname,
+      url: request.url,
       method: request.method,
       headers: Object.fromEntries(request.headers),
       body: body ? Array.from(new Uint8Array(body)) : null
@@ -55,7 +67,7 @@ async function proxyThroughSW(request, port, clientId) {
     const timeout = setTimeout(() => {
       port.removeEventListener("message", handler);
       reject(new Error("Timeout from SharedWorker"));
-    }, 15000); // 15s timeout for bigger files
+    }, 15000);
 
     function handler(evt) {
       if (evt.data?.id === id) {
