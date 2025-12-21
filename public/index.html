@@ -9,43 +9,33 @@
 
 <input id="path" value="/api/hello" />
 <button id="go" disabled>Fetch</button>
-
 <pre id="out"></pre>
 
 <script>
 let ws;
 let aesKey;
 const pending = new Map();
-
-/* ---------- crypto helpers ---------- */
 const enc = new TextEncoder();
 const dec = new TextDecoder();
 
-function b64(buf) {
-  return btoa(String.fromCharCode(...new Uint8Array(buf)));
-}
-function fromB64(str) {
-  return Uint8Array.from(atob(str), c => c.charCodeAt(0));
-}
+// Base64 helpers
+const b64 = buf => btoa(String.fromCharCode(...new Uint8Array(buf)));
+const fromB64 = str => Uint8Array.from(atob(str), c => c.charCodeAt(0));
 
-/* ---------- WS + crypto init ---------- */
+// ---------- WS + crypto init ----------
 async function initWS() {
-  ws = new WebSocket("wss://asd-ywj6.onrender.com/ws");
+  ws = new WebSocket("wss://your-render-host/ws");
   ws.binaryType = "arraybuffer";
 
   await new Promise((res, rej) => {
     ws.onopen = res;
     ws.onerror = rej;
   });
-
   console.log("[WS] connected");
 
-  // fetch public key
-  const pem = await fetch("https://asd-ywj6.onrender.com/public.pem").then(r => r.text());
-  const keyData = pem
-    .replace(/-----.*?-----/g, "")
-    .replace(/\s+/g, "");
-
+  // Fetch public key
+  const pem = await fetch("https://your-render-host/public.pem").then(r => r.text());
+  const keyData = pem.replace(/-----.*?-----/g,"").replace(/\s+/g,"");
   const pubKey = await crypto.subtle.importKey(
     "spki",
     fromB64(keyData),
@@ -55,12 +45,7 @@ async function initWS() {
   );
 
   aesKey = crypto.getRandomValues(new Uint8Array(32));
-
-  const encryptedKey = await crypto.subtle.encrypt(
-    "RSA-OAEP",
-    pubKey,
-    aesKey
-  );
+  const encryptedKey = await crypto.subtle.encrypt("RSA-OAEP", pubKey, aesKey);
 
   ws.send(JSON.stringify({
     type: "init",
@@ -69,50 +54,26 @@ async function initWS() {
 
   ws.onmessage = async ev => {
     const msg = JSON.parse(ev.data);
-
     if (msg.type !== "data") return;
 
-    const iv  = fromB64(msg.ivBase64);
-    const ct  = fromB64(msg.payloadBase64);
+    const iv = fromB64(msg.ivBase64);
+    const ct = fromB64(msg.payloadBase64);
     const tag = fromB64(msg.tagBase64);
 
-    const key = await crypto.subtle.importKey(
-      "raw",
-      aesKey,
-      "AES-GCM",
-      false,
-      ["decrypt"]
-    );
-
-    const plain = await crypto.subtle.decrypt(
-      { name: "AES-GCM", iv, tagLength: 128 },
-      key,
-      new Uint8Array([...ct, ...tag])
-    );
-
+    const key = await crypto.subtle.importKey("raw", aesKey, "AES-GCM", false, ["decrypt"]);
+    const plain = await crypto.subtle.decrypt({name:"AES-GCM", iv, tagLength:128}, key, new Uint8Array([...ct,...tag]));
     const payload = JSON.parse(dec.decode(plain));
+
     pending.get(msg.id)?.(payload);
     pending.delete(msg.id);
   };
 }
 
-/* ---------- encrypt + send ---------- */
+// ---------- Send encrypted to WS ----------
 async function sendEncrypted(id, payload) {
   const iv = crypto.getRandomValues(new Uint8Array(12));
-
-  const key = await crypto.subtle.importKey(
-    "raw",
-    aesKey,
-    "AES-GCM",
-    false,
-    ["encrypt"]
-  );
-
-  const encData = await crypto.subtle.encrypt(
-    { name: "AES-GCM", iv },
-    key,
-    enc.encode(JSON.stringify(payload))
-  );
+  const key = await crypto.subtle.importKey("raw", aesKey, "AES-GCM", false, ["encrypt"]);
+  const encData = await crypto.subtle.encrypt({name:"AES-GCM", iv}, key, enc.encode(JSON.stringify(payload)));
 
   const ct = encData.slice(0, encData.byteLength - 16);
   const tag = encData.slice(encData.byteLength - 16);
@@ -126,19 +87,18 @@ async function sendEncrypted(id, payload) {
   }));
 }
 
-/* ---------- SW messaging ---------- */
+// ---------- SW messaging ----------
 function initProxyMessaging() {
   navigator.serviceWorker.addEventListener("message", evt => {
     if (evt.data?.type !== "proxy-fetch") return;
-
     const { id, req } = evt.data;
 
     pending.set(id, res => {
       navigator.serviceWorker.controller.postMessage({ id, res });
     });
 
-    // 🔑 PATH ONLY
     const url = new URL(req.url);
+    // Only send the path to WS
     sendEncrypted(id, {
       method: req.method,
       url: url.pathname,
@@ -148,35 +108,31 @@ function initProxyMessaging() {
   });
 }
 
-/* ---------- init ---------- */
+// ---------- Init ----------
 (async () => {
   await navigator.serviceWorker.register("/sw.js");
   await navigator.serviceWorker.ready;
-  
+
   if (!navigator.serviceWorker.controller) {
     await new Promise(res => {
       navigator.serviceWorker.addEventListener("controllerchange", res, { once: true });
     });
   }
-  
-  // Set up SW messaging
+
   initProxyMessaging();
-  
-  // WS init
   await initWS();
   console.log("[Page] WS ready");
-  
-  // Enable fetch button now
+
   document.getElementById("go").disabled = false;
 })();
 
-/* ---------- fetch button ---------- */
+// ---------- Fetch button ----------
 document.getElementById("go").onclick = async () => {
   const path = document.getElementById("path").value.trim();
   const out = document.getElementById("out");
 
-  if (!path.startsWith("/")) {
-    out.textContent = "Path must start with /";
+  if (!path.startsWith("/api/")) {
+    out.textContent = "Only /api/ paths are allowed";
     return;
   }
 
