@@ -24,7 +24,7 @@ const pending = new Map();
 // --- WS init ---
 function initWS() {
   return new Promise((resolve, reject) => {
-    ws = new WebSocket("wss://YOUR_SERVER_HERE");
+    ws = new WebSocket("wss://asd-ywj6.onrender.com/ws");
     ws.binaryType = "arraybuffer";
 
     ws.onopen = () => {
