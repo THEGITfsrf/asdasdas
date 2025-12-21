@@ -1,20 +1,40 @@
 self.addEventListener("install", () => self.skipWaiting());
+self.addEventListener("activate", e => e.waitUntil(self.clients.claim()));
 
-self.addEventListener("activate", evt =>
-  evt.waitUntil(self.clients.claim())
-);
+// pending fetch resolvers
+const pending = new Map();
+
+// 🔒 MUST be top-level (this fixes your warning)
+self.addEventListener("message", evt => {
+  const { id, res } = evt.data || {};
+  if (!id || !pending.has(id)) return;
+
+  const { resolve, timeout } = pending.get(id);
+  clearTimeout(timeout);
+  pending.delete(id);
+
+  resolve(
+    new Response(
+      res.body ? new Uint8Array(res.body) : null,
+      {
+        status: res.status || 200,
+        headers: res.headers || {}
+      }
+    )
+  );
+});
 
 self.addEventListener("fetch", evt => {
   const url = new URL(evt.request.url);
 
   // never intercept the SW itself
-  if (url.pathname.endsWith("/sw.js")||url.pathname==("/")) return;
+  if (url.pathname.endsWith("/sw.js")) return;
 
   evt.respondWith(handleFetch(evt.request));
 });
 
 async function handleFetch(request) {
-  // grab ANY controlled window
+  // grab ANY available window
   const clients = await self.clients.matchAll({
     type: "window",
     includeUncontrolled: true
@@ -22,8 +42,8 @@ async function handleFetch(request) {
 
   const client = clients[0];
   if (!client) {
-    // stealth rule: never leak to network
-    return new Response("No client bound", { status: 502 });
+    // stealth rule: never leak
+    return new Response("No client available", { status: 502 });
   }
 
   const id = crypto.randomUUID();
@@ -44,30 +64,12 @@ async function handleFetch(request) {
     }
   });
 
-  return new Promise((resolve, reject) => {
+  return new Promise(resolve => {
     const timeout = setTimeout(() => {
-      reject(new Error("proxy timeout"));
+      pending.delete(id);
+      resolve(new Response("Proxy timeout", { status: 502 }));
     }, 15000);
 
-    function onMessage(evt) {
-      if (evt.data?.id !== id) return;
-
-      clearTimeout(timeout);
-      self.removeEventListener("message", onMessage);
-
-      const res = evt.data.res;
-
-      resolve(
-        new Response(
-          res.body ? new Uint8Array(res.body) : null,
-          {
-            status: res.status || 200,
-            headers: res.headers || {}
-          }
-        )
-      );
-    }
-
-    self.addEventListener("message", onMessage);
+    pending.set(id, { resolve, timeout });
   });
 }
