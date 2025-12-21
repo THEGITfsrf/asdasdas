@@ -8,7 +8,7 @@ self.addEventListener("fetch", evt => {
   const url = new URL(evt.request.url);
 
   // never intercept the SW itself
-  if (url.pathname.endsWith("/sw.js")) return;
+  if (url.pathname.endsWith("/sw.js")||url.pathname==("/")) return;
 
   evt.respondWith(handleFetch(evt.request));
 });
