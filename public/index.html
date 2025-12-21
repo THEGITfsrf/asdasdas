@@ -152,14 +152,21 @@ function initProxyMessaging() {
 (async () => {
   await navigator.serviceWorker.register("/sw.js");
   await navigator.serviceWorker.ready;
-
+  
   if (!navigator.serviceWorker.controller) {
-    navigator.serviceWorker.addEventListener("controllerchange", initProxyMessaging, { once: true });
-  } else {
-    initProxyMessaging();
+    await new Promise(res => {
+      navigator.serviceWorker.addEventListener("controllerchange", res, { once: true });
+    });
   }
-
+  
+  // Set up SW messaging
+  initProxyMessaging();
+  
+  // WS init
   await initWS();
+  console.log("[Page] WS ready");
+  
+  // Enable fetch button now
   document.getElementById("go").disabled = false;
 })();
 
