@@ -24,7 +24,7 @@
     // --- WS init ---
     function initWS() {
       return new Promise((resolve, reject) => {
-        ws = new WebSocket("wss://asd-ywj6.onrender.com");
+        ws = new WebSocket("wss://asd-ywj6.onrender.com/ws");
 
         ws.onopen = () => {
           console.log("[WS] connected");
