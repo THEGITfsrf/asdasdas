@@ -14,97 +14,156 @@
 
 <script>
 let ws;
+let aesKey;
 const pending = new Map();
 
-// --- WS init ---
-function initWS() {
-  return new Promise((resolve, reject) => {
-    ws = new WebSocket("wss://asd-ywj6.onrender.com/ws");
-    ws.binaryType = "arraybuffer";
+/* ---------- crypto helpers ---------- */
+const enc = new TextEncoder();
+const dec = new TextDecoder();
 
-    ws.onopen = () => {
-      console.log("[WS] connected");
-      resolve();
-    };
-
-    ws.onerror = e => {
-      console.error("[WS] error", e);
-      reject(e);
-    };
-
-    ws.onmessage = ev => {
-      let msg;
-      try { msg = JSON.parse(ev.data); } 
-      catch { return; }
-
-      console.log("[WS] message received", msg);
-
-      const entry = pending.get(msg.id);
-      if (!entry) return;
-
-      pending.delete(msg.id);
-      entry.resolve(msg);
-    };
-  });
+function b64(buf) {
+  return btoa(String.fromCharCode(...new Uint8Array(buf)));
+}
+function fromB64(str) {
+  return Uint8Array.from(atob(str), c => c.charCodeAt(0));
 }
 
-// --- SW messaging ---
+/* ---------- WS + crypto init ---------- */
+async function initWS() {
+  ws = new WebSocket("wss://asd-ywj6.onrender.com/ws");
+  ws.binaryType = "arraybuffer";
+
+  await new Promise((res, rej) => {
+    ws.onopen = res;
+    ws.onerror = rej;
+  });
+
+  console.log("[WS] connected");
+
+  // fetch public key
+  const pem = await fetch("https://asd-ywj6.onrender.com/public.pem").then(r => r.text());
+  const keyData = pem
+    .replace(/-----.*?-----/g, "")
+    .replace(/\s+/g, "");
+
+  const pubKey = await crypto.subtle.importKey(
+    "spki",
+    fromB64(keyData),
+    { name: "RSA-OAEP", hash: "SHA-256" },
+    false,
+    ["encrypt"]
+  );
+
+  aesKey = crypto.getRandomValues(new Uint8Array(32));
+
+  const encryptedKey = await crypto.subtle.encrypt(
+    "RSA-OAEP",
+    pubKey,
+    aesKey
+  );
+
+  ws.send(JSON.stringify({
+    type: "init",
+    encryptedKeyBase64: b64(encryptedKey)
+  }));
+
+  ws.onmessage = async ev => {
+    const msg = JSON.parse(ev.data);
+
+    if (msg.type !== "data") return;
+
+    const iv  = fromB64(msg.ivBase64);
+    const ct  = fromB64(msg.payloadBase64);
+    const tag = fromB64(msg.tagBase64);
+
+    const key = await crypto.subtle.importKey(
+      "raw",
+      aesKey,
+      "AES-GCM",
+      false,
+      ["decrypt"]
+    );
+
+    const plain = await crypto.subtle.decrypt(
+      { name: "AES-GCM", iv, tagLength: 128 },
+      key,
+      new Uint8Array([...ct, ...tag])
+    );
+
+    const payload = JSON.parse(dec.decode(plain));
+    pending.get(msg.id)?.(payload);
+    pending.delete(msg.id);
+  };
+}
+
+/* ---------- encrypt + send ---------- */
+async function sendEncrypted(id, payload) {
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+
+  const key = await crypto.subtle.importKey(
+    "raw",
+    aesKey,
+    "AES-GCM",
+    false,
+    ["encrypt"]
+  );
+
+  const encData = await crypto.subtle.encrypt(
+    { name: "AES-GCM", iv },
+    key,
+    enc.encode(JSON.stringify(payload))
+  );
+
+  const ct = encData.slice(0, encData.byteLength - 16);
+  const tag = encData.slice(encData.byteLength - 16);
+
+  ws.send(JSON.stringify({
+    type: "data",
+    id,
+    ivBase64: b64(iv),
+    payloadBase64: b64(ct),
+    tagBase64: b64(tag)
+  }));
+}
+
+/* ---------- SW messaging ---------- */
 function initProxyMessaging() {
   navigator.serviceWorker.addEventListener("message", evt => {
-    console.log("[Page] SW message received", evt.data);
-
     if (evt.data?.type !== "proxy-fetch") return;
 
     const { id, req } = evt.data;
-    console.log("[Page] proxy-fetch ID", id);
 
-    pending.set(id, {
-      resolve: res => {
-        console.log("[Page] sending response back to SW", id);
-        navigator.serviceWorker.controller.postMessage({ id, res });
-      }
+    pending.set(id, res => {
+      navigator.serviceWorker.controller.postMessage({ id, res });
     });
 
-    console.log("[Page] sending request to WS", id, req.url);
-
-    if (ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({ id, packet: req }));
-    } else {
-      ws.addEventListener("open", () => {
-        ws.send(JSON.stringify({ id, packet: req }));
-      }, { once: true });
-    }
+    // 🔑 PATH ONLY
+    const url = new URL(req.url);
+    sendEncrypted(id, {
+      method: req.method,
+      url: url.pathname,
+      headers: req.headers,
+      body: req.body
+    });
   });
 }
 
-// --- Init ---
-async function init() {
-  console.log("[Page] registering SW");
+/* ---------- init ---------- */
+(async () => {
   await navigator.serviceWorker.register("/sw.js");
-
-  // Wait until the SW is ready
   await navigator.serviceWorker.ready;
 
-  // Wait for controller (Option A)
   if (!navigator.serviceWorker.controller) {
-    console.log("[Page] waiting for controllerchange");
-    navigator.serviceWorker.addEventListener("controllerchange", () => {
-      console.log("[Page] controller ready");
-      initProxyMessaging();
-    });
+    navigator.serviceWorker.addEventListener("controllerchange", initProxyMessaging, { once: true });
   } else {
     initProxyMessaging();
   }
 
-  console.log("[Page] SW ready");
-
   await initWS();
-  console.log("[Page] WS ready");
-
   document.getElementById("go").disabled = false;
-}
+})();
 
-// --- Fetch button ---
+/* ---------- fetch button ---------- */
 document.getElementById("go").onclick = async () => {
   const path = document.getElementById("path").value.trim();
   const out = document.getElementById("out");
@@ -114,20 +173,13 @@ document.getElementById("go").onclick = async () => {
     return;
   }
 
-  out.textContent = `Fetching ${path} ...`;
-
   try {
     const res = await fetch(path);
-    const text = await res.text();
-    out.textContent = `Status: ${res.status}\n\n${text}`;
+    out.textContent = `Status: ${res.status}\n\n${await res.text()}`;
   } catch (e) {
     out.textContent = "Error: " + e;
   }
 };
-
-init().catch(e => {
-  document.getElementById("out").textContent = "Init failed: " + e;
-});
 </script>
 </body>
 </html>
