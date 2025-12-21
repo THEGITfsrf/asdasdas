@@ -1,18 +1,30 @@
 self.addEventListener("install", () => self.skipWaiting());
-self.addEventListener("activate", evt => evt.waitUntil(self.clients.claim()));
+
+self.addEventListener("activate", evt =>
+  evt.waitUntil(self.clients.claim())
+);
 
 self.addEventListener("fetch", evt => {
   const url = new URL(evt.request.url);
 
+  // never intercept the SW itself
   if (url.pathname.endsWith("/sw.js")) return;
 
   evt.respondWith(handleFetch(evt.request));
 });
 
 async function handleFetch(request) {
-  const client = await self.clients.get(request.clientId);
+  // grab ANY controlled window
+  const clients = await self.clients.matchAll({
+    type: "window",
+    includeUncontrolled: true
+  });
 
-  if (!client) return fetch(request);
+  const client = clients[0];
+  if (!client) {
+    // stealth rule: never leak to network
+    return new Response("No client bound", { status: 502 });
+  }
 
   const id = crypto.randomUUID();
 
@@ -33,7 +45,9 @@ async function handleFetch(request) {
   });
 
   return new Promise((resolve, reject) => {
-    const timeout = setTimeout(() => reject("timeout"), 15000);
+    const timeout = setTimeout(() => {
+      reject(new Error("proxy timeout"));
+    }, 15000);
 
     function onMessage(evt) {
       if (evt.data?.id !== id) return;
@@ -42,10 +56,14 @@ async function handleFetch(request) {
       self.removeEventListener("message", onMessage);
 
       const res = evt.data.res;
+
       resolve(
         new Response(
           res.body ? new Uint8Array(res.body) : null,
-          { status: res.status, headers: res.headers }
+          {
+            status: res.status || 200,
+            headers: res.headers || {}
+          }
         )
       );
     }
