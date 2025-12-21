@@ -1,86 +1,59 @@
+// sw.js
 self.addEventListener("install", () => {
   console.log("[SW] install");
   self.skipWaiting();
 });
 
-self.addEventListener("activate", e => {
+self.addEventListener("activate", evt => {
   console.log("[SW] activate");
-  e.waitUntil(self.clients.claim());
+  evt.waitUntil(self.clients.claim());
 });
 
 const pending = new Map();
 
+// Message listener (top-level, fixes warning)
 self.addEventListener("message", evt => {
-  console.log("[SW] message event received", evt.data);
-
   const { id, res } = evt.data || {};
-  if (!id) {
-    console.warn("[SW] message missing id");
-    return;
-  }
-
-  if (!pending.has(id)) {
-    console.warn("[SW] no pending entry for id", id);
-    return;
-  }
+  if (!id || !pending.has(id)) return;
 
   const { resolve, timeout } = pending.get(id);
   clearTimeout(timeout);
   pending.delete(id);
 
-  console.log("[SW] resolving fetch", {
-    id,
-    status: res?.status,
-    hasBody: !!res?.body
-  });
-
   resolve(
-    new Response(
-      res?.body ? new Uint8Array(res.body) : null,
-      {
-        status: res?.status || 200,
-        headers: res?.headers || {}
-      }
-    )
+    new Response(res.body ? new Uint8Array(res.body) : null, {
+      status: res.status || 200,
+      headers: res.headers || {}
+    })
   );
 });
 
 self.addEventListener("fetch", evt => {
   const url = new URL(evt.request.url);
 
+  // Never intercept SW itself
   if (url.pathname.endsWith("/sw.js")) return;
 
-  console.log("[SW] intercept fetch", { url: evt.request.url, method: evt.request.method });
+  // Only proxy /api/
+  if (!url.pathname.startsWith("/api/")) {
+    return; // fallback to network
+  }
 
+  console.log("[SW] intercept fetch", { url: url.href, method: evt.request.method });
   evt.respondWith(handleFetch(evt.request));
 });
 
 async function handleFetch(request) {
-  console.log("[SW] handleFetch start", request.url);
-
-  const clients = await self.clients.matchAll({
-    type: "window",
-    includeUncontrolled: true
-  });
-
-  console.log("[SW] clients found", clients.length);
-
+  const clients = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
   const client = clients[0];
-  if (!client) {
-    console.error("[SW] no client available");
-    return new Response("No client available", { status: 502 });
-  }
+  if (!client) return fetch(request); // fallback if no client
 
   const id = crypto.randomUUID();
-  console.log("[SW] generated id", id);
 
-  let body = null;
-  if (request.method !== "GET" && request.method !== "HEAD") {
-    body = await request.arrayBuffer();
-    console.log("[SW] request has body", body.byteLength);
-  }
-
-  console.log("[SW] posting proxy-fetch to page", { id, url: request.url });
+  const body =
+    request.method === "GET" || request.method === "HEAD"
+      ? null
+      : await request.arrayBuffer();
 
   client.postMessage({
     type: "proxy-fetch",
@@ -95,12 +68,11 @@ async function handleFetch(request) {
 
   return new Promise(resolve => {
     const timeout = setTimeout(() => {
-      console.error("[SW] proxy timeout", id);
       pending.delete(id);
       resolve(new Response("Proxy timeout", { status: 502 }));
+      console.warn("[SW] proxy timeout", id);
     }, 15000);
 
     pending.set(id, { resolve, timeout });
-    console.log("[SW] pending set", id);
   });
 }
