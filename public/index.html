@@ -3,11 +3,6 @@
 <head>
 <meta charset="UTF-8">
 <title>Stealth WS Tunnel</title>
-<style>
-  body { font-family: sans-serif; }
-  input { width: 300px; }
-  pre { background: #111; color: #0f0; padding: 10px; }
-</style>
 </head>
 <body>
 <h1>Stealth Tunnel</h1>
@@ -39,16 +34,13 @@ function initWS() {
 
     ws.onmessage = ev => {
       let msg;
-      try { msg = JSON.parse(ev.data); }
+      try { msg = JSON.parse(ev.data); } 
       catch { return; }
 
       console.log("[WS] message received", msg);
 
       const entry = pending.get(msg.id);
-      if (!entry) {
-        console.warn("[WS] no pending entry for id", msg.id);
-        return;
-      }
+      if (!entry) return;
 
       pending.delete(msg.id);
       entry.resolve(msg);
@@ -56,39 +48,54 @@ function initWS() {
   });
 }
 
-// --- SW messages ---
-navigator.serviceWorker.addEventListener("message", evt => {
-  console.log("[Page] SW message received", evt.data);
+// --- SW messaging ---
+function initProxyMessaging() {
+  navigator.serviceWorker.addEventListener("message", evt => {
+    console.log("[Page] SW message received", evt.data);
 
-  if (evt.data?.type !== "proxy-fetch") return;
+    if (evt.data?.type !== "proxy-fetch") return;
 
-  const { id, req } = evt.data;
+    const { id, req } = evt.data;
+    console.log("[Page] proxy-fetch ID", id);
 
-  console.log("[Page] proxy-fetch ID", id);
+    pending.set(id, {
+      resolve: res => {
+        console.log("[Page] sending response back to SW", id);
+        navigator.serviceWorker.controller.postMessage({ id, res });
+      }
+    });
 
-  pending.set(id, {
-    resolve: res => {
-      console.log("[Page] sending response back to SW", id);
-      navigator.serviceWorker.controller.postMessage({ id, res });
+    console.log("[Page] sending request to WS", id, req.url);
+
+    if (ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ id, packet: req }));
+    } else {
+      ws.addEventListener("open", () => {
+        ws.send(JSON.stringify({ id, packet: req }));
+      }, { once: true });
     }
   });
+}
 
-  console.log("[Page] sending request to WS", id, req.url);
-
-  // safe send
-  if (ws.readyState === WebSocket.OPEN) {
-    ws.send(JSON.stringify({ id, packet: req }));
-  } else {
-    ws.addEventListener("open", () => {
-      ws.send(JSON.stringify({ id, packet: req }));
-    }, { once: true });
-  }
-});
-
+// --- Init ---
 async function init() {
   console.log("[Page] registering SW");
   await navigator.serviceWorker.register("/sw.js");
+
+  // Wait until the SW is ready
   await navigator.serviceWorker.ready;
+
+  // Wait for controller (Option A)
+  if (!navigator.serviceWorker.controller) {
+    console.log("[Page] waiting for controllerchange");
+    navigator.serviceWorker.addEventListener("controllerchange", () => {
+      console.log("[Page] controller ready");
+      initProxyMessaging();
+    });
+  } else {
+    initProxyMessaging();
+  }
+
   console.log("[Page] SW ready");
 
   await initWS();
@@ -97,7 +104,8 @@ async function init() {
   document.getElementById("go").disabled = false;
 }
 
-async function doFetch() {
+// --- Fetch button ---
+document.getElementById("go").onclick = async () => {
   const path = document.getElementById("path").value.trim();
   const out = document.getElementById("out");
 
@@ -115,9 +123,7 @@ async function doFetch() {
   } catch (e) {
     out.textContent = "Error: " + e;
   }
-}
-
-document.getElementById("go").onclick = doFetch;
+};
 
 init().catch(e => {
   document.getElementById("out").textContent = "Init failed: " + e;
