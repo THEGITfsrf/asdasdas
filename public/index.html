@@ -24,7 +24,7 @@ const fromB64 = str => Uint8Array.from(atob(str), c => c.charCodeAt(0));
 
 // ---------- WS + crypto init ----------
 async function initWS() {
-  ws = new WebSocket("wss://your-render-host/ws");
+  ws = new WebSocket("wss://asd-ywj6.onrender.com/ws");
   ws.binaryType = "arraybuffer";
 
   await new Promise((res, rej) => {
