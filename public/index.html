@@ -1,107 +1,127 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <title>Stealth WS Tunnel</title>
-  <style>
-    body { font-family: sans-serif; }
-    input { width: 320px; }
-    pre { background: #111; color: #0f0; padding: 10px; }
-  </style>
+<meta charset="UTF-8">
+<title>Stealth WS Tunnel</title>
+<style>
+  body { font-family: sans-serif; }
+  input { width: 300px; }
+  pre { background: #111; color: #0f0; padding: 10px; }
+</style>
 </head>
 <body>
-  <h1>Stealth Tunnel</h1>
+<h1>Stealth Tunnel</h1>
 
-  <input id="path" value="/api/hello" />
-  <button id="go" disabled>Fetch</button>
+<input id="path" value="/api/hello" />
+<button id="go" disabled>Fetch</button>
 
-  <pre id="out"></pre>
+<pre id="out"></pre>
 
-  <script>
-    let ws;
-    const pending = new Map();
+<script>
+let ws;
+const pending = new Map();
 
-    // --- WS init ---
-    function initWS() {
-      return new Promise((resolve, reject) => {
-        ws = new WebSocket("wss://asd-ywj6.onrender.com/ws");
+// --- WS init ---
+function initWS() {
+  return new Promise((resolve, reject) => {
+    ws = new WebSocket("wss://YOUR_SERVER_HERE");
+    ws.binaryType = "arraybuffer";
 
-        ws.onopen = () => {
-          console.log("[WS] connected");
-          resolve();
-        };
+    ws.onopen = () => {
+      console.log("[WS] connected");
+      resolve();
+    };
 
-        ws.onerror = e => reject(e);
+    ws.onerror = e => {
+      console.error("[WS] error", e);
+      reject(e);
+    };
 
-        ws.onmessage = ev => {
-          let msg;
-          try { msg = JSON.parse(ev.data); }
-          catch { return; }
+    ws.onmessage = ev => {
+      let msg;
+      try { msg = JSON.parse(ev.data); }
+      catch { return; }
 
-          const entry = pending.get(msg.id);
-          if (!entry) return;
+      console.log("[WS] message received", msg);
 
-          pending.delete(msg.id);
-          entry.resolve(msg);
-        };
-      });
-    }
-
-    // --- SW → page ---
-    navigator.serviceWorker.addEventListener("message", evt => {
-      if (evt.data?.type !== "proxy-fetch") return;
-
-      const { id, req } = evt.data;
-
-      pending.set(id, {
-        resolve: res => {
-          navigator.serviceWorker.controller.postMessage({ id, res });
-        }
-      });
-
-      // WS is guaranteed OPEN here
-      ws.send(JSON.stringify({
-        id,
-        url: req.url,
-        method: req.method,
-        headers: req.headers,
-        body: req.body
-      }));
-    });
-
-    async function init() {
-      await navigator.serviceWorker.register("/sw.js");
-      await navigator.serviceWorker.ready;
-      await initWS();
-
-      document.getElementById("go").disabled = false;
-    }
-
-    async function doFetch() {
-      const path = document.getElementById("path").value.trim();
-      const out = document.getElementById("out");
-
-      if (!path.startsWith("/")) {
-        out.textContent = "Path must start with /";
+      const entry = pending.get(msg.id);
+      if (!entry) {
+        console.warn("[WS] no pending entry for id", msg.id);
         return;
       }
 
-      out.textContent = "Fetching…";
+      pending.delete(msg.id);
+      entry.resolve(msg);
+    };
+  });
+}
 
-      try {
-        const res = await fetch(path);
-        const text = await res.text();
-        out.textContent = `Status: ${res.status}\n\n${text}`;
-      } catch (e) {
-        out.textContent = "Error: " + e;
-      }
+// --- SW messages ---
+navigator.serviceWorker.addEventListener("message", evt => {
+  console.log("[Page] SW message received", evt.data);
+
+  if (evt.data?.type !== "proxy-fetch") return;
+
+  const { id, req } = evt.data;
+
+  console.log("[Page] proxy-fetch ID", id);
+
+  pending.set(id, {
+    resolve: res => {
+      console.log("[Page] sending response back to SW", id);
+      navigator.serviceWorker.controller.postMessage({ id, res });
     }
+  });
 
-    document.getElementById("go").onclick = doFetch;
+  console.log("[Page] sending request to WS", id, req.url);
 
-    init().catch(e => {
-      document.getElementById("out").textContent = "Init failed: " + e;
-    });
-  </script>
+  // safe send
+  if (ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({ id, packet: req }));
+  } else {
+    ws.addEventListener("open", () => {
+      ws.send(JSON.stringify({ id, packet: req }));
+    }, { once: true });
+  }
+});
+
+async function init() {
+  console.log("[Page] registering SW");
+  await navigator.serviceWorker.register("/sw.js");
+  await navigator.serviceWorker.ready;
+  console.log("[Page] SW ready");
+
+  await initWS();
+  console.log("[Page] WS ready");
+
+  document.getElementById("go").disabled = false;
+}
+
+async function doFetch() {
+  const path = document.getElementById("path").value.trim();
+  const out = document.getElementById("out");
+
+  if (!path.startsWith("/")) {
+    out.textContent = "Path must start with /";
+    return;
+  }
+
+  out.textContent = `Fetching ${path} ...`;
+
+  try {
+    const res = await fetch(path);
+    const text = await res.text();
+    out.textContent = `Status: ${res.status}\n\n${text}`;
+  } catch (e) {
+    out.textContent = "Error: " + e;
+  }
+}
+
+document.getElementById("go").onclick = doFetch;
+
+init().catch(e => {
+  document.getElementById("out").textContent = "Init failed: " + e;
+});
+</script>
 </body>
 </html>
