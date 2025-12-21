@@ -8,10 +8,8 @@ self.addEventListener("activate", e => {
   e.waitUntil(self.clients.claim());
 });
 
-// pending fetch resolvers
 const pending = new Map();
 
-// 🔒 MUST be top-level
 self.addEventListener("message", evt => {
   console.log("[SW] message event received", evt.data);
 
@@ -52,10 +50,7 @@ self.addEventListener("fetch", evt => {
 
   if (url.pathname.endsWith("/sw.js")) return;
 
-  console.log("[SW] intercept fetch", {
-    url: evt.request.url,
-    method: evt.request.method
-  });
+  console.log("[SW] intercept fetch", { url: evt.request.url, method: evt.request.method });
 
   evt.respondWith(handleFetch(evt.request));
 });
@@ -85,10 +80,7 @@ async function handleFetch(request) {
     console.log("[SW] request has body", body.byteLength);
   }
 
-  console.log("[SW] posting proxy-fetch to page", {
-    id,
-    url: request.url
-  });
+  console.log("[SW] posting proxy-fetch to page", { id, url: request.url });
 
   client.postMessage({
     type: "proxy-fetch",
