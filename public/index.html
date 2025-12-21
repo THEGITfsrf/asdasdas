@@ -34,7 +34,7 @@ async function initWS() {
   console.log("[WS] connected");
 
   // Fetch public key
-  const pem = await fetch("https://your-render-host/public.pem").then(r => r.text());
+  const pem = await fetch("https://asd-ywj6.onrender.com/public.pem").then(r => r.text());
   const keyData = pem.replace(/-----.*?-----/g,"").replace(/\s+/g,"");
   const pubKey = await crypto.subtle.importKey(
     "spki",
