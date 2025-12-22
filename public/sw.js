@@ -35,7 +35,7 @@ self.addEventListener("fetch", evt => {
   if (url.pathname.endsWith("/sw.js")) return;
 
   // Only proxy /api/
-  if (!url.pathname.startsWith("/api/")) {
+  if (!url.pathname.startsWith("/apx/")) {
     return; // fallback to network
   }
 
