@@ -131,8 +131,8 @@ document.getElementById("go").onclick = async () => {
   const path = document.getElementById("path").value.trim();
   const out = document.getElementById("out");
 
-  if (!path.startsWith("/api/")) {
-    out.textContent = "Only /api/ paths are allowed";
+  if (!path.startsWith("/apx/")) {
+    out.textContent = "Only /apx/ paths are allowed";
     return;
   }
 
