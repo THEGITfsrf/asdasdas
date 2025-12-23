@@ -9,7 +9,12 @@
 
 <input id="path" value="/apx/hello" />
 <button id="go" disabled>Fetch</button>
-<pre id="out"></pre>
+<iframe
+  id="frame"
+  style="width:100%; height:70vh; border:1px solid #444;"
+  sandbox="allow-scripts allow-forms allow-same-origin">
+</iframe>
+
 
 <script>
 let ws;
@@ -127,22 +132,20 @@ function initProxyMessaging() {
 })();
 
 // ---------- Fetch button ----------
-document.getElementById("go").onclick = async () => {
+document.getElementById("go").onclick = () => {
   const path = document.getElementById("path").value.trim();
   const out = document.getElementById("out");
+  const frame = document.getElementById("frame");
 
   if (!path.startsWith("/apx/")) {
     out.textContent = "Only /apx/ paths are allowed";
     return;
   }
 
-  try {
-    const res = await fetch(path);
-    out.textContent = `Status: ${res.status}\n\n${await res.text()}`;
-  } catch (e) {
-    out.textContent = "Error: " + e;
-  }
+  out.textContent = "Loading in iframe...";
+  frame.src = path;
 };
+
 </script>
 </body>
 </html>
