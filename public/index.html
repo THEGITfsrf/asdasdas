@@ -132,18 +132,20 @@ function initProxyMessaging() {
 })();
 
 // ---------- Fetch button ----------
-document.getElementById("go").onclick = () => {
+document.getElementById("go").onclick = async () => {
   const path = document.getElementById("path").value.trim();
-  const out = document.getElementById("out");
   const frame = document.getElementById("frame");
 
   if (!path.startsWith("/apx/")) {
-    out.textContent = "Only /apx/ paths are allowed";
+    alert("Only /apx/ paths allowed");
     return;
   }
 
-  out.textContent = "Loading in iframe...";
-  frame.src = path;
+  const res = await fetch(path); // <- intercepted by SW
+  const html = await res.text();
+
+  const blob = new Blob([html], { type: "text/html" });
+  frame.src = URL.createObjectURL(blob);
 };
 
 </script>
