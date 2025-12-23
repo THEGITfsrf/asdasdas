@@ -20,13 +20,24 @@ self.addEventListener("message", evt => {
   clearTimeout(timeout);
   pending.delete(id);
 
+  // Convert array of numbers back into string if needed
+  let bodyStr = null;
+  if (res.body) {
+    try {
+      bodyStr = String.fromCharCode(...res.body);
+    } catch {
+      bodyStr = ""; // fallback
+    }
+  }
+
   resolve(
-    new Response(res.body ? new Uint8Array(res.body) : null, {
+    new Response(bodyStr, {
       status: res.status || 200,
       headers: res.headers || {}
     })
   );
 });
+
 
 self.addEventListener("fetch", evt => {
   const url = new URL(evt.request.url);
