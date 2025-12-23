@@ -20,13 +20,15 @@ self.addEventListener("message", evt => {
   clearTimeout(timeout);
   pending.delete(id);
 
-  // Convert array of numbers back into string if needed
   let bodyStr = null;
+
   if (res.body) {
-    try {
+    if (Array.isArray(res.body)) {
+      // Convert number array back into string
       bodyStr = String.fromCharCode(...res.body);
-    } catch {
-      bodyStr = ""; // fallback
+    } else if (typeof res.body === "string") {
+      // Already a string
+      bodyStr = res.body;
     }
   }
 
@@ -37,6 +39,7 @@ self.addEventListener("message", evt => {
     })
   );
 });
+
 
 
 self.addEventListener("fetch", evt => {
