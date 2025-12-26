@@ -73,7 +73,24 @@ async function initWS() {
     if (msg.type !== "data") return;
 
     const iv = fromB64(msg.ivBase64);
-    const encData = fromB64(msg.payloadBase64);
+    const encData = await crypto.subtle.encrypt(
+      { name: "AES-GCM", iv },
+      key,
+      enc.encode(JSON.stringify(payload))
+    );
+    
+    const bytes = new Uint8Array(encData);
+    const tag = bytes.slice(bytes.length - 16);
+    const ct  = bytes.slice(0, bytes.length - 16);
+    
+    ws.send(JSON.stringify({
+      type: "data",
+      id,
+      ivBase64: b64(iv),
+      payloadBase64: b64(ct),
+      tagBase64: b64(tag)
+    }));
+
 
     const key = await crypto.subtle.importKey(
       "raw",
@@ -83,11 +100,19 @@ async function initWS() {
       ["decrypt"]
     );
 
+    const ct  = fromB64(msg.payloadBase64);
+    const tag = fromB64(msg.tagBase64);
+    
+    const combined = new Uint8Array(ct.length + tag.length);
+    combined.set(ct);
+    combined.set(tag, ct.length);
+    
     const plain = await crypto.subtle.decrypt(
       { name: "AES-GCM", iv },
       key,
-      encData
+      combined
     );
+
 
     const payload = JSON.parse(dec.decode(plain));
     pending.get(msg.id)?.(payload);
