@@ -56,7 +56,10 @@ async function initWS() {
     ["encrypt"]
   );
 
+  // generate AES key
   aesKey = crypto.getRandomValues(new Uint8Array(32));
+
+  // encrypt AES key with RSA
   const encryptedKey = await crypto.subtle.encrypt(
     "RSA-OAEP",
     pubKey,
@@ -72,27 +75,16 @@ async function initWS() {
     const msg = JSON.parse(ev.data);
     if (msg.type !== "data") return;
 
+    // decrypt incoming message
     const iv = fromB64(msg.ivBase64);
-    const encData = await crypto.subtle.encrypt(
-      { name: "AES-GCM", iv },
-      key,
-      enc.encode(JSON.stringify(payload))
-    );
-    
-    const bytes = new Uint8Array(encData);
-    const tag = bytes.slice(bytes.length - 16);
-    const ct  = bytes.slice(0, bytes.length - 16);
-    
-    ws.send(JSON.stringify({
-      type: "data",
-      id,
-      ivBase64: b64(iv),
-      payloadBase64: b64(ct),
-      tagBase64: b64(tag)
-    }));
+    const ctBytes  = fromB64(msg.payloadBase64);
+    const tagBytes = fromB64(msg.tagBase64);
 
+    const combined = new Uint8Array(ctBytes.length + tagBytes.length);
+    combined.set(ctBytes);
+    combined.set(tagBytes, ctBytes.length);
 
-    const key = await crypto.subtle.importKey(
+    const keyObj = await crypto.subtle.importKey(
       "raw",
       aesKey,
       "AES-GCM",
@@ -100,19 +92,11 @@ async function initWS() {
       ["decrypt"]
     );
 
-    const ct  = fromB64(msg.payloadBase64);
-    const tag = fromB64(msg.tagBase64);
-    
-    const combined = new Uint8Array(ct.length + tag.length);
-    combined.set(ct);
-    combined.set(tag, ct.length);
-    
     const plain = await crypto.subtle.decrypt(
       { name: "AES-GCM", iv },
-      key,
+      keyObj,
       combined
     );
-
 
     const payload = JSON.parse(dec.decode(plain));
     pending.get(msg.id)?.(payload);
@@ -123,7 +107,7 @@ async function initWS() {
 /* ---------- Send encrypted to WS ---------- */
 async function sendEncrypted(id, payload) {
   const iv = crypto.getRandomValues(new Uint8Array(12));
-  const key = await crypto.subtle.importKey(
+  const keyObj = await crypto.subtle.importKey(
     "raw",
     aesKey,
     "AES-GCM",
@@ -133,15 +117,21 @@ async function sendEncrypted(id, payload) {
 
   const encData = await crypto.subtle.encrypt(
     { name: "AES-GCM", iv },
-    key,
+    keyObj,
     enc.encode(JSON.stringify(payload))
   );
+
+  // split tag from ciphertext
+  const bytes = new Uint8Array(encData);
+  const tag = bytes.slice(bytes.length - 16);
+  const ct  = bytes.slice(0, bytes.length - 16);
 
   ws.send(JSON.stringify({
     type: "data",
     id,
     ivBase64: b64(iv),
-    payloadBase64: b64(encData)
+    payloadBase64: b64(ct),
+    tagBase64: b64(tag)
   }));
 }
 
@@ -170,7 +160,7 @@ function initProxyMessaging() {
 
     sendEncrypted(id, {
       method: req.method,
-      url: url.pathname, // base62-safe path
+      url: url.pathname,
       headers: cleanHeaders,
       body: req.body
     });
