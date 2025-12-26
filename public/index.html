@@ -3,6 +3,69 @@
 <head>
 <meta charset="UTF-8">
 <title>Stealth WS Tunnel</title>
+  <style>
+  body {
+    margin: 0;
+    font-family: Arial, sans-serif;
+    background: #1e1e1e;
+    color: #fff;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 20px;
+  }
+
+  h1 {
+    color: #00ffcc;
+    margin-bottom: 20px;
+  }
+
+  #controls {
+    width: 100%;
+    max-width: 800px;
+    display: flex;
+    gap: 10px;
+    margin-bottom: 20px;
+  }
+
+  input[type="text"] {
+    flex: 1;
+    padding: 8px 12px;
+    font-size: 16px;
+    border-radius: 5px;
+    border: none;
+  }
+
+  button {
+    padding: 8px 16px;
+    font-size: 16px;
+    border: none;
+    border-radius: 5px;
+    background: #00ffcc;
+    color: #000;
+    cursor: pointer;
+  }
+
+  button:disabled {
+    background: #555;
+    cursor: not-allowed;
+  }
+
+  /* 16:9 responsive container */
+  #iframe-container {
+    width: 100%;
+    max-width: 1920px;
+    aspect-ratio: 16 / 9;
+    background: #000;
+    border: 1px solid #444;
+  }
+
+  #frame {
+    width: 100%;
+    height: 100%;
+    border: none;
+  }
+</style>
 </head>
 <body>
 <h1>Stealth Tunnel</h1>
